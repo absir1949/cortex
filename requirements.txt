@@ -1,0 +1,22 @@
+# 核心依赖
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# 定时任务
+apscheduler>=3.10.0
+
+# 阿里云服务（语音识别）
+alibabacloud-oss-v2>=1.0.0
+alibabacloud_sts20150401>=1.0.0
+alibabacloud_tea_openapi>=1.0.0
+dashscope>=1.0.0
+
+# AI 总结
+openai>=1.0.0
+
+# 工具
+tqdm>=4.65.0
+rich>=13.0.0
+
+# 可选：视频下载
+yt-dlp>=2023.0.0
