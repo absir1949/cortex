@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
-from config import Config
+from config import Config, CreatorConfig
 
 
 class StorageManager:
@@ -11,7 +11,9 @@ class StorageManager:
 
     def __init__(self, creator_name: str):
         self.creator_name = creator_name
-        self.creator_dir = Config.DATA_DIR / creator_name
+        # 使用 Config 获取正确的目录路径（支持 ID_昵称 格式）
+        creator_config = CreatorConfig()
+        self.creator_dir = creator_config.get_creator_dir(creator_name)
         self.creator_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_filename(self, video_id: str, create_time: str = None) -> str:
