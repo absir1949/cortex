@@ -63,9 +63,9 @@ class CortexCLI:
         self.config.remove(name)
         console.print(f"[green]✓ 已删除创作者: {name}[/green]")
 
-    def cmd_run(self):
+    def cmd_run(self, force: bool = False):
         """运行一次所有创作者"""
-        self.core.run_once()
+        self.core.run_once(force_check=force)
 
     def cmd_transcribe(self):
         """给已下载但未转录的视频补充转录"""
@@ -151,7 +151,8 @@ class CortexCLI:
             self.cmd_remove(sys.argv[2])
 
         elif command == "run":
-            self.cmd_run()
+            force = "--force" in sys.argv or "-f" in sys.argv
+            self.cmd_run(force=force)
 
         elif command == "transcribe":
             self.cmd_transcribe()
@@ -187,7 +188,7 @@ class CortexCLI:
   python cli.py [yellow]add[/yellow] <名称> <平台> <ID> [间隔]
                                   - 添加创作者
   python cli.py [yellow]remove[/yellow] <名称>    - 删除创作者
-  python cli.py [yellow]run[/yellow]            - 运行一次（手动执行）
+  python cli.py [yellow]run[/yellow] [--force]  - 运行一次（手动执行）
   python cli.py [yellow]transcribe[/yellow]     - 给已下载视频补充转录
   python cli.py [yellow]start[/yellow]          - 启动定时监控
   python cli.py [yellow]stop[/yellow]           - 停止监控
@@ -199,6 +200,7 @@ class CortexCLI:
 
   python cli.py add 九栢米电商 douyin MS4wLjABAAAA... 48
   python cli.py run
+  python cli.py run --force  (强制检查，忽略时间间隔)
   python cli.py start
   python cli.py knowledge
 

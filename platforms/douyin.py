@@ -1,6 +1,8 @@
 """抖音平台适配器"""
+import json
 import subprocess
 import requests
+from datetime import datetime
 from typing import List
 from pathlib import Path
 from .base import PlatformAdapter, Video
@@ -29,9 +31,16 @@ class DouyinAdapter(PlatformAdapter):
             timeout=30
         )
 
+        if response.status_code != 200:
+            raise Exception(f"HTTP 错误 {response.status_code}: {response.text}")
+
         data = response.json()
         if data.get("code") != 200:
-            raise Exception(f"API 错误: {data.get('message', 'Unknown error')}")
+            error_detail = json.dumps(data, ensure_ascii=False, indent=2)
+            raise Exception(
+                f"API 错误 (code={data.get('code')}): {data.get('message', 'Unknown error')}\n"
+                f"完整响应: {error_detail}"
+            )
 
         videos = []
         for item in data.get("data", {}).get("aweme_list", []):
@@ -60,26 +69,43 @@ class DouyinAdapter(PlatformAdapter):
         return videos
 
     def download_video(self, video: Video, output_path: str) -> bool:
-        """下载抖音视频"""
-        script_path = Path("/Volumes/扩展/code/mcp/n8n/scripts/download-douyin-video.js")
+        """下载抖音视频（纯 Python，优先用 API 直链，降级用 yt-dlp）"""
+        # 方式一：直接从 API 返回的 video_url 下载
+        if video.video_url:
+            try:
+                resp = requests.get(
+                    video.video_url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36",
+                        "Referer": "https://www.douyin.com/",
+                    },
+                    stream=True,
+                    timeout=120,
+                )
+                if resp.status_code == 200:
+                    with open(output_path, "wb") as f:
+                        for chunk in resp.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                    if Path(output_path).stat().st_size > 10000:
+                        return True
+                    # 文件太小，可能是错误页面，删掉走降级
+                    Path(output_path).unlink(missing_ok=True)
+            except Exception:
+                Path(output_path).unlink(missing_ok=True)
 
+        # 方式二：yt-dlp 降级
         try:
             result = subprocess.run(
-                ["node", str(script_path), video.share_url, output_path],
+                [
+                    "yt-dlp",
+                    "--no-warnings",
+                    "-o", output_path,
+                    video.share_url,
+                ],
                 capture_output=True,
                 text=True,
                 timeout=180,
-                check=False
             )
-
-            if result.returncode != 0:
-                return False
-
-            # 检查文件是否存在
-            return Path(output_path).exists()
-
+            return result.returncode == 0 and Path(output_path).exists()
         except Exception:
             return False
-
-
-from datetime import datetime

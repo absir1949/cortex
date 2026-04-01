@@ -1,0 +1,12 @@
+services:
+  cortex:
+    build: .
+    container_name: cortex
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./knowledge:/app/knowledge
+      - ./creators.json:/app/creators.json
+    # 默认 "start" 模式（APScheduler 常驻调度）
+    # 如需单次运行: docker compose run --rm cortex run --force

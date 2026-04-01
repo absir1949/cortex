@@ -125,19 +125,3 @@ class CreatorConfig:
                 c['last_check'] = datetime.now().isoformat()
                 break
         self._save()
-        """获取创作者数据目录（通过名称查找，兼容旧版本）"""
-        for c in self._creators:
-            if c['name'] == name:
-                dir_name = c.get('directory', name)
-                return Config.DATA_DIR / dir_name
-        # 兼容旧版本：直接用名称
-        safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).strip()
-        return Config.DATA_DIR / safe_name
-
-    def get_creator_dir_by_id(self, creator_id: str) -> Path:
-        """通过 ID 获取创作者数据目录"""
-        for c in self._creators:
-            if c['id'] == creator_id:
-                dir_name = c.get('directory', c.get('name'))
-                return Config.DATA_DIR / dir_name
-        raise ValueError(f"找不到 ID 为 {creator_id} 的创作者")

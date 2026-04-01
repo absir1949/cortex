@@ -52,13 +52,21 @@ class CortexCore:
 
         console.print(f"  获取到 {len(videos)} 个视频")
 
+        # 显示最新视频的日期
+        if videos:
+            latest_date = max(v.create_time for v in videos)
+            console.print(f"  最新视频日期: {latest_date}")
+
         # 过滤新视频
         new_videos = []
+        existing_count = 0
         for video in videos:
             if not storage.exists(video.video_id):
                 new_videos.append(video)
+            else:
+                existing_count += 1
 
-        console.print(f"  新视频: {len(new_videos)} 个")
+        console.print(f"  新视频: {len(new_videos)} 个 (已存在: {existing_count} 个)")
 
         if not new_videos:
             console.print(f"  [dim]没有新视频，跳过[/dim]")
@@ -153,12 +161,13 @@ class CortexCore:
         self.config.update_last_check(name)
         console.print(f"[green]✓ 完成[/green]")
 
-    def run_once(self, skip_transcribe: bool = False, transcribe_existing: bool = False):
+    def run_once(self, skip_transcribe: bool = False, transcribe_existing: bool = False, force_check: bool = False):
         """运行一次所有创作者
 
         Args:
             skip_transcribe: 是否跳过转录
             transcribe_existing: 是否给已下载但未转录的视频补充转录
+            force_check: 是否强制检查（忽略时间间隔）
         """
         creators = self.config.get_enabled()
 
@@ -166,9 +175,25 @@ class CortexCore:
             console.print("[yellow]没有启用的创作者[/yellow]")
             return
 
-        console.print(f"\n[bold]Cortex - 处理 {len(creators)} 个创作者[/bold]")
+        if force_check:
+            console.print(f"\n[bold]Cortex - 强制检查 {len(creators)} 个创作者[/bold]")
+        else:
+            console.print(f"\n[bold]Cortex - 处理 {len(creators)} 个创作者[/bold]")
 
         for creator in creators:
+            # 检查是否需要更新（除非强制检查）
+            if not force_check:
+                # 检查时间间隔
+                last_check = creator.get('last_check')
+                if last_check:
+                    from datetime import datetime, timedelta
+                    last_time = datetime.fromisoformat(last_check)
+                    interval = timedelta(hours=creator.get('interval_hours', 48))
+                    if datetime.now() - last_time < interval:
+                        console.print(f"\n🎯 处理创作者: {creator['name']}")
+                        console.print(f"  [dim]距离上次检查不足 {creator.get('interval_hours', 48)} 小时，跳过[/dim]")
+                        continue
+
             self.process_creator(creator, skip_transcribe, transcribe_existing)
 
         console.print("\n[bold green]✓ 全部完成[/bold green]")
