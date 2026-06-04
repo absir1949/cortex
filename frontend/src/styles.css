@@ -1,0 +1,750 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg text-text;
+  font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
+  background:
+    linear-gradient(180deg, rgba(235, 246, 240, 0.72), rgba(255, 255, 255, 0) 380px),
+    #f7faf8;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.app-shell {
+  @apply min-h-full;
+}
+
+.topbar {
+  @apply sticky top-0 z-20 border-b border-border/80;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(18px);
+}
+
+.topbar-inner {
+  @apply max-w-6xl mx-auto px-5 py-4 flex items-center justify-between gap-4;
+}
+
+.brand {
+  @apply flex items-center gap-3 text-text;
+}
+
+.brand-mark {
+  @apply h-10 w-10 rounded-full bg-accent text-white flex items-center justify-center font-semibold;
+}
+
+.brand strong {
+  @apply block text-base leading-tight;
+}
+
+.brand small {
+  @apply block text-xs text-muted mt-0.5;
+}
+
+.top-nav {
+  @apply flex items-center gap-1 rounded-full border border-border bg-panel p-1 shadow-sm;
+}
+
+.top-nav-item {
+  @apply px-4 py-2 rounded-full text-sm text-muted transition-colors;
+}
+
+.top-nav-item.active {
+  @apply bg-accent text-white;
+}
+
+.app-main {
+  @apply max-w-6xl mx-auto px-5 py-8;
+}
+
+/* 通用组件样式 */
+.card {
+  @apply bg-panel border border-border rounded-2xl p-5 shadow-sm;
+}
+
+.surface {
+  @apply bg-panel border border-border rounded-2xl p-5 shadow-sm;
+}
+
+.btn {
+  @apply px-4 py-2 rounded-full text-sm font-semibold transition-colors;
+}
+
+.btn-primary {
+  @apply btn bg-accent text-white hover:bg-accent/90;
+}
+
+.btn-ghost {
+  @apply btn border border-border bg-panel hover:border-accent hover:text-accent;
+}
+
+.btn-danger {
+  @apply btn border border-border text-danger hover:bg-danger hover:text-white;
+}
+
+.input {
+  @apply bg-panel border border-border rounded-xl px-4 py-3 text-sm w-full focus:outline-none focus:border-accent;
+}
+
+.badge {
+  @apply inline-block px-2.5 py-1 rounded-full text-xs border border-border;
+}
+
+.badge-ok { @apply badge text-accent border-accent/40; }
+.badge-err { @apply badge text-danger border-danger/40; }
+.badge-info { @apply badge text-accentAlt border-accentAlt/40; }
+
+.table {
+  @apply w-full text-sm;
+}
+.table th {
+  @apply text-left font-medium text-muted border-b border-border pb-2 pt-1;
+}
+.table td {
+  @apply py-2 border-b border-border/60;
+}
+
+/* markdown 渲染 */
+.prose-cortex h1 { @apply text-xl font-semibold mt-4 mb-2; }
+.prose-cortex h2 { @apply text-lg font-semibold mt-4 mb-2 text-accent; }
+.prose-cortex h3 { @apply text-base font-semibold mt-3 mb-1 text-accentAlt; }
+.prose-cortex p  { @apply my-2 leading-relaxed; }
+.prose-cortex ul { @apply list-disc ml-5 my-2 space-y-1; }
+.prose-cortex ol { @apply list-decimal ml-5 my-2 space-y-1; }
+.prose-cortex code { @apply bg-border px-1 py-0.5 rounded text-xs; }
+.prose-cortex pre { @apply bg-border p-3 rounded overflow-x-auto my-2; }
+.prose-cortex hr { @apply border-border my-4; }
+.prose-cortex table { @apply w-full my-2 border-collapse; }
+.prose-cortex th, .prose-cortex td { @apply border border-border p-2; }
+.prose-cortex blockquote { @apply border-l-4 border-accent pl-3 italic text-muted; }
+
+.home-page,
+.topic-page {
+  @apply space-y-8;
+}
+
+.soft-label {
+  @apply text-xs font-semibold text-accentAlt uppercase;
+  letter-spacing: 0.08em;
+}
+
+.daily-letter {
+  @apply grid gap-6 items-stretch;
+  grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.8fr);
+}
+
+.daily-copy {
+  @apply rounded-[1.5rem] p-8 border border-border bg-panel shadow-sm;
+}
+
+.daily-copy h1 {
+  @apply text-4xl font-semibold mt-5 max-w-2xl leading-tight;
+}
+
+.daily-copy p {
+  @apply text-lg text-muted mt-5 max-w-2xl leading-relaxed;
+}
+
+.daily-card {
+  @apply rounded-[1.5rem] p-6 border border-accent/20 flex flex-col justify-between min-h-[300px];
+  background: #e9f7ef;
+  color: #17221d;
+}
+
+.daily-card span {
+  @apply text-sm text-accent font-semibold;
+}
+
+.daily-card h2 {
+  @apply text-2xl font-semibold leading-snug mt-5;
+}
+
+.daily-card p {
+  @apply text-sm text-muted leading-relaxed mt-4;
+}
+
+.pill-button {
+  @apply inline-flex items-center justify-center px-5 py-3 rounded-full border border-border bg-panel text-sm font-semibold text-text transition-colors hover:border-accent hover:text-accent;
+}
+
+.pill-button.primary {
+  @apply border-accent bg-accent text-white hover:bg-accent/90 hover:text-white;
+}
+
+.pill-button.quiet {
+  @apply bg-transparent;
+}
+
+.pill-button.small {
+  @apply px-3 py-2 text-xs;
+}
+
+.pill-button.wide {
+  @apply w-full;
+}
+
+.ask-bar {
+  @apply rounded-[1.25rem] border border-border bg-panel p-5 shadow-sm;
+}
+
+.ask-bar h2 {
+  @apply text-xl font-semibold;
+}
+
+.ask-bar p {
+  @apply text-sm text-muted mt-1;
+}
+
+.ask-form {
+  @apply grid gap-3 mt-4;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr) auto;
+}
+
+.notice-line {
+  @apply mt-3 rounded-full border border-accent/30 bg-accent/10 px-4 py-2 text-sm text-accent;
+}
+
+.section-title-row {
+  @apply flex items-end justify-between gap-5;
+}
+
+.section-title-row h2,
+.recent-strip h2,
+.reader-block h2,
+.rail-block h2 {
+  @apply text-2xl font-semibold mt-1;
+}
+
+.section-title-row p {
+  @apply text-muted mt-2;
+}
+
+.new-topic-form {
+  @apply rounded-[1.5rem] border border-border bg-panel p-4 shadow-sm grid gap-3;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.topic-grid {
+  @apply grid grid-cols-1 md:grid-cols-2 gap-5;
+}
+
+.topic-card {
+  @apply rounded-[1.25rem] border border-border bg-panel p-6 shadow-sm text-text transition-all hover:-translate-y-0.5 hover:border-accent hover:shadow-md;
+}
+
+.topic-card-main {
+  @apply flex flex-col gap-2;
+}
+
+.topic-status {
+  @apply self-start rounded-full bg-accent/10 px-3 py-1 text-xs font-semibold text-accent;
+}
+
+.topic-card h3 {
+  @apply text-2xl font-semibold mt-2;
+}
+
+.topic-card p {
+  @apply text-sm text-muted;
+}
+
+.topic-card-brief {
+  @apply mt-8 border-t border-border pt-5;
+}
+
+.topic-card-brief span {
+  @apply block text-xs text-muted mb-2;
+}
+
+.topic-card-brief strong {
+  @apply block text-lg leading-snug;
+}
+
+.topic-card-foot {
+  @apply mt-6 flex flex-wrap gap-2 text-xs text-muted;
+}
+
+.topic-card-foot span {
+  @apply rounded-full px-3 py-1;
+  background: #edf3ef;
+}
+
+.recent-strip {
+  @apply rounded-[1.25rem] border border-border bg-panel p-6 shadow-sm;
+}
+
+.brief-list {
+  @apply mt-4 divide-y divide-border;
+}
+
+.brief-row {
+  @apply grid gap-3 py-4 text-text transition-colors hover:text-accent;
+  grid-template-columns: 58px minmax(0, 1fr) 140px;
+}
+
+.brief-row span {
+  @apply text-xs text-accentAlt font-semibold;
+}
+
+.brief-row strong {
+  @apply truncate;
+}
+
+.brief-row small {
+  @apply text-xs text-muted text-right;
+}
+
+.tiny-note,
+.muted-line {
+  @apply text-sm text-muted;
+}
+
+.tiny-note {
+  @apply mt-4;
+}
+
+.topic-hero {
+  @apply rounded-[1.5rem] border border-border bg-panel p-7 shadow-sm flex items-end justify-between gap-8;
+}
+
+.topic-hero-copy {
+  @apply max-w-3xl;
+}
+
+.topic-hero-copy h1 {
+  @apply text-4xl font-semibold mt-3 leading-tight;
+}
+
+.topic-hero-copy p {
+  @apply text-muted text-base leading-relaxed mt-4;
+}
+
+.topic-actions {
+  @apply flex flex-wrap justify-end gap-3;
+}
+
+.topic-layout {
+  @apply grid gap-6 items-start;
+  grid-template-columns: minmax(0, 1fr) 390px;
+}
+
+.topic-reader,
+.topic-rail {
+  @apply space-y-6;
+}
+
+.reader-block,
+.rail-block {
+  @apply rounded-[1.25rem] border border-border bg-panel p-6 shadow-sm;
+}
+
+.reader-block-head,
+.rail-head {
+  @apply flex items-start justify-between gap-4;
+}
+
+.reader-tag,
+.archive-count {
+  @apply rounded-full px-3 py-1 text-xs text-muted;
+  background: #edf3ef;
+}
+
+.featured-report {
+  @apply block mt-5 rounded-[1rem] border border-border p-6 transition-colors hover:border-accent;
+  background: #fbfdfc;
+}
+
+.featured-report h3 {
+  @apply text-2xl font-semibold leading-snug;
+}
+
+.featured-report time {
+  @apply block text-sm text-muted mt-2;
+}
+
+.featured-report p {
+  @apply text-muted leading-relaxed mt-5;
+}
+
+.featured-report > span {
+  @apply inline-block text-accent font-semibold mt-5;
+}
+
+.empty-topic {
+  @apply rounded-[1rem] border border-dashed border-border bg-panel p-6 text-muted;
+}
+
+.follow-form {
+  @apply mt-5 grid gap-3;
+}
+
+.follow-list {
+  @apply mt-5 space-y-3;
+}
+
+.follow-item {
+  @apply grid gap-3 rounded-[1rem] border border-border p-4;
+  background: #fbfdfc;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+}
+
+.follow-avatar {
+  @apply h-11 w-11 rounded-full bg-accent/10 text-accent flex items-center justify-center font-semibold;
+}
+
+.follow-body strong {
+  @apply block;
+}
+
+.follow-body small {
+  @apply block text-xs text-muted mt-1;
+}
+
+.follow-body em {
+  @apply block text-xs text-danger not-italic mt-2;
+}
+
+.follow-actions {
+  @apply flex flex-col gap-2;
+}
+
+.follow-actions button {
+  @apply rounded-full border border-border bg-panel px-3 py-1.5 text-xs text-muted hover:border-accent hover:text-accent;
+}
+
+.rhythm-block {
+  @apply space-y-4;
+}
+
+.rhythm-block p {
+  @apply text-sm text-muted leading-relaxed mt-2;
+}
+
+.eyebrow {
+  @apply text-xs uppercase tracking-wider text-accentAlt font-semibold;
+}
+
+.page-title {
+  @apply text-2xl font-semibold mt-1;
+}
+
+.page-subtitle {
+  @apply text-sm text-muted mt-2 max-w-2xl leading-relaxed;
+}
+
+.hero-surface,
+.group-hero {
+  @apply flex items-start justify-between gap-6 p-6;
+}
+
+.hero-stats {
+  @apply grid grid-cols-3 gap-3 min-w-[280px];
+}
+
+.hero-stats div,
+.kpi-box {
+  @apply bg-bg border border-border rounded-md p-3;
+}
+
+.hero-stats span,
+.kpi-box strong {
+  @apply block text-2xl font-semibold text-accent;
+}
+
+.hero-stats label,
+.kpi-box label {
+  @apply block text-xs text-muted mt-1;
+}
+
+.hero-actions {
+  @apply flex flex-wrap justify-end gap-2;
+}
+
+.section-head {
+  @apply flex items-end justify-between gap-4;
+}
+
+.section-head h2,
+.panel-head h2 {
+  @apply text-lg font-semibold;
+}
+
+.section-head p,
+.panel-head p {
+  @apply text-sm text-muted mt-1;
+}
+
+.section-head.tight {
+  @apply mb-2;
+}
+
+.compact-form {
+  @apply flex gap-2;
+}
+
+.group-grid {
+  @apply grid grid-cols-1 md:grid-cols-2 gap-4;
+}
+
+.group-card {
+  @apply bg-panel border border-border rounded-lg p-4 block hover:border-accent/50 transition-colors;
+}
+
+.group-card-top {
+  @apply flex items-start justify-between gap-3;
+}
+
+.group-name {
+  @apply font-semibold text-lg;
+}
+
+.group-card-meta {
+  @apply flex flex-wrap gap-2 mt-4 text-xs text-muted;
+}
+
+.group-card-meta span {
+  @apply bg-bg border border-border rounded-md px-2 py-1;
+}
+
+.group-card-report {
+  @apply mt-4;
+}
+
+.group-card-report label {
+  @apply text-xs text-muted;
+}
+
+.group-card-report p {
+  @apply text-sm mt-1 overflow-hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.group-card-next {
+  @apply mt-4 pt-3 border-t border-border text-xs text-muted;
+}
+
+.two-column {
+  @apply grid grid-cols-1 lg:grid-cols-2 gap-4;
+}
+
+.two-column.wide-left {
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.8fr);
+}
+
+.report-list {
+  @apply divide-y divide-border/70;
+}
+
+.report-row {
+  @apply flex gap-3 py-3 first:pt-0 last:pb-0 hover:text-accent transition-colors;
+}
+
+.report-row small {
+  @apply block text-xs text-muted mt-1;
+}
+
+.report-kind {
+  @apply shrink-0 h-6 min-w-14 px-2 rounded-md border border-accentAlt/40 text-accentAlt text-xs flex items-center justify-center;
+}
+
+.task-strip {
+  @apply flex flex-col gap-2;
+}
+
+.task-chip,
+.task-note {
+  @apply border border-border rounded-md px-3 py-2 hover:border-accent/50 transition-colors;
+}
+
+.task-chip span {
+  @apply text-sm font-medium;
+}
+
+.task-chip small {
+  @apply block text-xs text-muted mt-1;
+}
+
+.task-note {
+  @apply text-sm text-muted;
+}
+
+.back-link {
+  @apply inline-block text-sm text-muted hover:text-accent mb-3;
+}
+
+.kpi-row {
+  @apply grid grid-cols-2 lg:grid-cols-4 gap-3;
+}
+
+.panel-head {
+  @apply flex items-start justify-between gap-3 mb-4;
+}
+
+.latest-report {
+  @apply block border border-border rounded-md p-4 hover:border-accent/50 transition-colors;
+}
+
+.latest-title {
+  @apply text-lg font-semibold;
+}
+
+.latest-time {
+  @apply text-xs text-muted mt-1;
+}
+
+.latest-report p {
+  @apply text-sm text-muted leading-relaxed mt-3;
+}
+
+.empty-state {
+  @apply text-sm text-muted border border-dashed border-border rounded-md p-4;
+}
+
+.settings-grid {
+  @apply grid grid-cols-2 gap-3;
+}
+
+.settings-grid label span {
+  @apply block text-xs text-muted mb-1;
+}
+
+.full-button {
+  @apply w-full mt-4;
+}
+
+.add-source-form {
+  @apply grid grid-cols-1 md:grid-cols-[120px_1fr_1fr_auto] gap-2 mb-3;
+}
+
+.source-list {
+  @apply space-y-2;
+}
+
+.source-item {
+  @apply bg-panel border border-border rounded-lg p-4 flex items-start justify-between gap-4;
+}
+
+.source-name {
+  @apply font-semibold;
+}
+
+.source-meta {
+  @apply flex flex-wrap gap-2 mt-2 text-xs text-muted;
+}
+
+.source-meta span {
+  @apply bg-bg border border-border rounded-md px-2 py-1;
+}
+
+.source-error {
+  @apply text-xs text-danger mt-2;
+}
+
+.source-actions {
+  @apply shrink-0 flex gap-2;
+}
+
+.danger-link {
+  @apply text-danger text-sm hover:underline;
+}
+
+@media (max-width: 1024px) {
+  .daily-letter,
+  .topic-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .topic-hero {
+    @apply items-start flex-col;
+  }
+
+  .topic-actions {
+    @apply justify-start;
+  }
+
+  .two-column.wide-left {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    @apply px-4;
+  }
+
+  .app-main {
+    @apply px-4 py-5;
+  }
+
+  .brand small {
+    @apply hidden;
+  }
+
+  .daily-copy,
+  .daily-card,
+  .topic-hero {
+    @apply rounded-2xl p-5;
+  }
+
+  .daily-copy h1,
+  .topic-hero-copy h1 {
+    @apply text-3xl;
+  }
+
+  .daily-copy p {
+    @apply text-base;
+  }
+
+  .ask-form,
+  .new-topic-form,
+  .brief-row,
+  .follow-item {
+    grid-template-columns: 1fr;
+  }
+
+  .brief-row small {
+    @apply text-left;
+  }
+
+  .section-title-row,
+  .reader-block-head,
+  .rail-head {
+    @apply items-start flex-col;
+  }
+
+  .settings-grid {
+    @apply grid-cols-1;
+  }
+
+  .hero-surface,
+  .group-hero {
+    @apply flex-col;
+  }
+
+  .hero-stats {
+    @apply min-w-0 w-full;
+  }
+
+  .section-head {
+    @apply items-start flex-col;
+  }
+
+  .compact-form,
+  .source-item {
+    @apply flex-col;
+  }
+
+  .source-actions {
+    @apply w-full;
+  }
+}

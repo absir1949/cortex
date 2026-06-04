@@ -1,6 +1,18 @@
-# 核心依赖
+# Web 框架
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.9.0
+pydantic-settings>=2.6.0
+
+# 数据库
+sqlmodel>=0.0.22
+
+# HTTP
 requests>=2.31.0
-python-dotenv>=1.0.0
+httpx>=0.27.0
+
+# LLM（OpenAI 兼容层）
+openai>=1.54.0
 
 # 定时任务
 apscheduler>=3.10.0
@@ -8,15 +20,18 @@ apscheduler>=3.10.0
 # 阿里云服务（语音识别）
 alibabacloud-oss-v2>=1.0.0
 alibabacloud_sts20150401>=1.0.0
-alibabacloud_tea_openapi>=1.0.0
+alibabacloud_tea_openapi>=0.3.0
 dashscope>=1.0.0
 
-# AI 总结
-openai>=1.0.0
+# 配置
+python-dotenv>=1.0.0
 
-# 工具
-tqdm>=4.65.0
+# 视频下载（降级方案）
+yt-dlp>=2023.0.0
+
+# CLI
 rich>=13.0.0
 
-# 可选：视频下载
-yt-dlp>=2023.0.0
+# 测试
+pytest>=8.0.0
+pytest-asyncio>=0.24.0

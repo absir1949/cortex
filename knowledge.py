@@ -3,88 +3,147 @@ import json
 import requests
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Set
 from rich.console import Console
 
 from config import Config
 
 console = Console()
 
+ANALYZED_FILE = ".analyzed.json"
 
-def extract_knowledge(topics: List[str] = None) -> Dict[str, Any]:
-    """从所有创作者内容中提炼知识
 
-    Args:
-        topics: 指定话题列表，如 None 则自动发现
+def extract_knowledge() -> Dict[str, Any]:
+    """增量分析：每个创作者只分析未分析过的新转录
 
     Returns:
-        知识报告
+        {"creators": [{"name": ..., "analysis": ..., "new_count": N}, ...]}
     """
-    console.print("\n[bold cyan]🧠 AI 知识提炼[/bold cyan]")
+    console.print("\n[bold cyan]🧠 AI 知识提炼（增量）[/bold cyan]")
 
-    # 1. 收集所有转录文本
-    all_transcripts = []
     data_dir = Config.DATA_DIR
+    results = []
+    total_new = 0
 
     for creator_dir in data_dir.iterdir():
         if not creator_dir.is_dir():
             continue
 
-        console.print(f"  扫描: {creator_dir.name}")
+        analyzed = _load_analyzed(creator_dir)
+        new_transcripts = _collect_new_transcripts(creator_dir, analyzed)
 
-        for txt_file in creator_dir.glob("*.txt"):
-            try:
-                transcript = txt_file.read_text(encoding='utf-8')
-                metadata_file = txt_file.with_suffix('.json')
+        if not new_transcripts:
+            console.print(f"  [dim]{creator_dir.name}: 无新内容，跳过[/dim]")
+            continue
 
-                if metadata_file.exists():
-                    metadata = json.loads(metadata_file.read_text(encoding='utf-8'))
-                else:
-                    metadata = {}
+        console.print(f"  [yellow]{creator_dir.name}: 发现 {len(new_transcripts)} 条新转录[/yellow]")
 
-                all_transcripts.append({
-                    'creator': creator_dir.name,
-                    'content': transcript,
-                    'metadata': metadata
-                })
-            except:
+        analysis = _analyze_creator(creator_dir.name, new_transcripts)
+        if analysis:
+            results.append({
+                "name": creator_dir.name,
+                "analysis": analysis,
+                "new_count": len(new_transcripts),
+            })
+            # 标记为已分析
+            new_ids = {t['video_id'] for t in new_transcripts}
+            _save_analyzed(creator_dir, analyzed | new_ids)
+            total_new += len(new_transcripts)
+
+    knowledge = {"creators": results}
+
+    if not results:
+        console.print("[dim]本次没有新内容需要分析[/dim]")
+        return knowledge
+
+    # 保存报告
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    report_json = Config.KNOWLEDGE_DIR / f"knowledge_{timestamp}.json"
+    report_json.write_text(json.dumps(knowledge, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    report_md = Config.KNOWLEDGE_DIR / f"knowledge_{timestamp}.md"
+    report_md.write_text(_to_markdown(knowledge), encoding='utf-8')
+
+    console.print(f"[green]✓ 分析了 {len(results)} 个创作者，共 {total_new} 条新转录[/green]")
+    console.print(f"[green]✓ 知识报告已保存: {report_json}[/green]")
+
+    return knowledge
+
+
+def _load_analyzed(creator_dir: Path) -> Set[str]:
+    """读取该创作者已分析过的 video_id 集合"""
+    state_file = creator_dir / ANALYZED_FILE
+    if not state_file.exists():
+        return set()
+    try:
+        data = json.loads(state_file.read_text(encoding='utf-8'))
+        return set(data.get('video_ids', []))
+    except Exception:
+        return set()
+
+
+def _save_analyzed(creator_dir: Path, video_ids: Set[str]):
+    """保存已分析的 video_id 集合"""
+    state_file = creator_dir / ANALYZED_FILE
+    state_file.write_text(json.dumps({
+        'video_ids': sorted(video_ids),
+        'updated_at': datetime.now().isoformat(),
+    }, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def _collect_new_transcripts(creator_dir: Path, analyzed: Set[str]) -> List[Dict]:
+    """收集该创作者目录下未分析过的转录，按时间倒序"""
+    new_items = []
+    for txt_file in sorted(creator_dir.glob("*.txt"), reverse=True):
+        try:
+            # 通过同名 json 元数据获取 video_id
+            meta_file = txt_file.with_suffix('.json')
+            if not meta_file.exists():
+                continue
+            meta = json.loads(meta_file.read_text(encoding='utf-8'))
+            video_id = meta.get('video_id')
+            if not video_id or video_id in analyzed:
                 continue
 
-    console.print(f"  收集到 {len(all_transcripts)} 个转录文本")
+            transcript = txt_file.read_text(encoding='utf-8').strip()
+            if not transcript:
+                continue
 
-    if not all_transcripts:
-        console.print("[yellow]没有转录文本可用[/yellow]")
-        return {}
+            new_items.append({
+                'video_id': video_id,
+                'title': meta.get('title', ''),
+                'content': transcript,
+            })
+        except Exception:
+            continue
+    return new_items
 
-    # 2. 调用 AI 提炼知识
-    console.print("[yellow]AI 分析中...[/yellow]")
 
-    prompt = f"""你是一个专业的知识分析师。请从以下内容创作者的转录文本中提炼有价值的知识。
+def _analyze_creator(creator_name: str, transcripts: List[Dict]) -> str:
+    """分析单个创作者的新转录内容，返回自然语言分析文本"""
+    content_parts = []
+    for t in transcripts:
+        title_line = f"【{t['title']}】" if t['title'] else ""
+        content_parts.append(f"{title_line}\n{t['content']}")
 
-输入内容：{len(all_transcripts)} 个创作者的转录文本。
+    all_content = "\n\n---\n\n".join(content_parts)
 
-请按以下结构输出JSON：
+    if len(all_content) > 15000:
+        all_content = all_content[:15000] + "\n\n...（内容过长已截断）"
 
-{{
-  "topics": [
-    {{
-      "name": "话题名称",
-      "description": "话题描述",
-      "key_points": ["要点1", "要点2", "要点3"],
-      "creators": ["创作者A", "创作者B"],
-      "insights": ["洞察1", "洞察2"]
-    }}
-  ],
-  "summary": "整体总结",
-  "trends": ["趋势1", "趋势2"],
-  "recommendations": ["建议1", "建议2"]
-}}
+    prompt = f"""以下是电商创作者「{creator_name}」最近发布的 {len(transcripts)} 条短视频转录内容。
 
-转录文本样例（前5个）：
-"""
+请你仔细阅读全部内容，输出一份详细的知识整理。要求：
 
-    for i, item in enumerate(all_transcripts[:5]):
-        prompt += f"\n\n--- {item['creator']} ---\n{item['content'][:500]}..."
+1. **不要过度概括**，保留具体的数字、方法、操作步骤等细节
+2. 按话题分段整理，每个话题下列出该创作者提到的具体做法和观点
+3. 特别注意那些不容易被注意到的隐性经验（比如踩坑经历、反常识的做法、具体的参数设置等）
+4. 如果创作者提到了具体的工具、软件、平台规则变化，要原样记录
+5. 用中文输出，不要输出 JSON，直接输出可读的文本
+
+转录内容：
+
+{all_content}"""
 
     try:
         response = requests.post(
@@ -98,7 +157,7 @@ def extract_knowledge(topics: List[str] = None) -> Dict[str, Any]:
                 "messages": [
                     {
                         "role": "system",
-                        "content": "你是一个专业的知识分析师，擅长从大量内容中提炼有价值的知识和洞察。"
+                        "content": "你是电商行业的知识整理专家。你的任务是从创作者的口语化视频内容中，提炼出有实操价值的知识，保留关键细节，不要空洞概括。"
                     },
                     {
                         "role": "user",
@@ -106,52 +165,32 @@ def extract_knowledge(topics: List[str] = None) -> Dict[str, Any]:
                     }
                 ]
             },
-            timeout=120
+            timeout=180
         )
-
         response.raise_for_status()
         data = response.json()
-
-        content = data["choices"][0]["message"]["content"]
-
-        # 尝试解析 JSON
-        try:
-            # 提取 JSON 部分
-            import re
-            json_match = re.search(r'\{[\s\S]*\}', content)
-            if json_match:
-                knowledge = json.loads(json_match.group())
-            else:
-                knowledge = {"raw": content}
-        except:
-            knowledge = {"raw": content}
-
-        # 保存报告
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        report_file = Config.KNOWLEDGE_DIR / f"knowledge_{timestamp}.md"
-
-        report = f"""# Cortex 知识报告
-
-**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-**分析内容**: {len(all_transcripts)} 个转录文本
-
----
-
-## 知识内容
-
-{content}
-
----
-
-*由 Cortex 自动生成*
-"""
-
-        report_file.write_text(report, encoding='utf-8')
-
-        console.print(f"[green]✓ 知识报告已保存: {report_file}[/green]")
-
-        return knowledge
-
+        return data["choices"][0]["message"]["content"]
     except Exception as e:
-        console.print(f"[red]✗ AI 分析失败: {e}[/red]")
-        return {"error": str(e)}
+        console.print(f"    [red]✗ 分析失败: {e}[/red]")
+        return None
+
+
+def _to_markdown(knowledge: Dict[str, Any]) -> str:
+    """将知识报告转为 markdown"""
+    lines = [
+        f"# Cortex 知识报告",
+        f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        ""
+    ]
+
+    for creator in knowledge.get("creators", []):
+        count = creator.get('new_count', 0)
+        lines.append(f"## {creator['name']}（本次新增 {count} 条）")
+        lines.append("")
+        lines.append(creator.get('analysis', '（无分析结果）'))
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    lines.append("*由 Cortex 自动生成*")
+    return "\n".join(lines)

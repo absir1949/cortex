@@ -169,6 +169,11 @@ class CortexCLI:
         elif command == "knowledge":
             self.cmd_knowledge()
 
+        elif command == "notify":
+            from notify import push_message
+            msg = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "Cortex 测试消息"
+            push_message(msg)
+
         elif command == "videos":
             creator = sys.argv[2] if len(sys.argv) > 2 else None
             self.cmd_videos(creator)
@@ -194,6 +199,8 @@ class CortexCLI:
   python cli.py [yellow]stop[/yellow]           - 停止监控
   python cli.py [yellow]status[/yellow]          - 查看状态
   python cli.py [yellow]knowledge[/yellow]       - 生成知识报告
+  python cli.py [yellow]notify[/yellow]          - 推送最新知识报告到群
+  python cli.py [yellow]notify[/yellow] <消息>   - 推送自定义消息到群
   python cli.py [yellow]videos[/yellow] [名称]   - 查看已处理视频
 
 [bold]示例:[/bold]

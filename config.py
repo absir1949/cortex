@@ -33,6 +33,10 @@ class Config:
     OSS_ENDPOINT = os.getenv("OSS_ENDPOINT", "")
     BAILIAN_API_KEY = os.getenv("BAILIAN_API_KEY", "")
 
+    # Bee 消息推送
+    BEE_URL = os.getenv("BEE_URL", "http://192.168.2.122:3100")
+    BEE_NOTIFY_GROUP = os.getenv("BEE_NOTIFY_GROUP", "微信小店项目前沿信息群")
+
     @classmethod
     def ensure_dirs(cls):
         """确保目录存在"""

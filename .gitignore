@@ -30,6 +30,14 @@ Thumbs.db
 # 数据目录
 data/
 knowledge/
+research/
+backup/
+state/
+
+# Frontend generated/dependency files
+frontend/node_modules/
+frontend/dist/
+app/web/static/
 
 # 临时文件
 *.tmp

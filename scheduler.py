@@ -81,6 +81,9 @@ class CortexCore:
                     console.print(f"    [red]✗[/red] {video.title[:30]} - 下载失败")
                     continue
 
+                # 记录文件大小（在复制前获取）
+                file_size = Path(temp_video_path).stat().st_size
+
                 # 2. 保存视频
                 import shutil
                 final_path = storage.save_video(video.video_id, temp_video_path, video.create_time)
@@ -105,7 +108,7 @@ class CortexCore:
                     'share_url': video.share_url,
                     'statistics': video.statistics,
                     'downloaded_at': datetime.now().isoformat(),
-                    'file_size': Path(temp_video_path).stat().st_size,
+                    'file_size': file_size,
                     'transcribed': transcription_text is not None
                 })
 
@@ -180,10 +183,10 @@ class CortexCore:
         else:
             console.print(f"\n[bold]Cortex - 处理 {len(creators)} 个创作者[/bold]")
 
+        has_new = False
         for creator in creators:
             # 检查是否需要更新（除非强制检查）
             if not force_check:
-                # 检查时间间隔
                 last_check = creator.get('last_check')
                 if last_check:
                     from datetime import datetime, timedelta
@@ -195,8 +198,35 @@ class CortexCore:
                         continue
 
             self.process_creator(creator, skip_transcribe, transcribe_existing)
+            has_new = True
+
+        # 有新内容 → 分析 → 推送
+        if has_new and not transcribe_existing:
+            self._analyze_and_notify()
 
         console.print("\n[bold green]✓ 全部完成[/bold green]")
+
+    def _analyze_and_notify(self):
+        """分析知识，然后推送（如果配置了推送）"""
+        # 分析
+        try:
+            from knowledge import extract_knowledge
+            console.print("\n[bold cyan]知识提炼...[/bold cyan]")
+            knowledge = extract_knowledge()
+        except Exception as e:
+            console.print(f"[red]✗ 知识提炼失败: {e}[/red]")
+            return
+
+        if not knowledge or knowledge.get("error"):
+            return
+
+        # 推送（有配置才推）
+        if Config.BEE_URL and Config.BEE_NOTIFY_GROUP:
+            try:
+                from notify import push_knowledge
+                push_knowledge(knowledge)
+            except Exception as e:
+                console.print(f"[yellow]⚠ 推送失败: {e}[/yellow]")
 
 
 class CortexScheduler:
@@ -208,32 +238,28 @@ class CortexScheduler:
         self.running = False
 
     def start(self):
-        """启动定时调度"""
+        """启动定时调度 — 统一跑 run_once 完整流程"""
         if self.running:
             console.print("[yellow]调度器已在运行[/yellow]")
             return
 
-        creators = self.core.config.get_enabled()
+        interval_hours = 48
+        trigger = IntervalTrigger(hours=interval_hours)
 
-        for creator in creators:
-            interval_hours = creator.get('interval_hours', 48)
-            trigger = IntervalTrigger(hours=interval_hours)
-
-            self.scheduler.add_job(
-                self.core.process_creator,
-                trigger=trigger,
-                id=f"creator_{creator['name']}",
-                args=[creator],
-                name=f"{creator['name']} ({interval_hours}h)"
-            )
+        self.scheduler.add_job(
+            self.core.run_once,
+            trigger=trigger,
+            id="cortex_pipeline",
+            name=f"完整流程 ({interval_hours}h)",
+        )
 
         self.scheduler.start()
         self.running = True
 
+        creators = self.core.config.get_enabled()
         console.print(f"[green]✓ 调度器已启动[/green]")
-        console.print(f"  监控 {len(creators)} 个创作者")
+        console.print(f"  监控 {len(creators)} 个创作者，每 {interval_hours} 小时运行一次")
 
-        # 显示下次运行时间
         self.show_next_runs()
 
     def show_next_runs(self):
