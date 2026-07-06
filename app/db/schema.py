@@ -2,7 +2,9 @@
 
 表：
   knowledge_groups   知识组
-  sources            订阅源
+  creators           博主（跨平台聚合的全局身份）
+  creator_aliases    博主的平台账号映射（platform+uid → creator）
+  sources            订阅源（组 × 平台账号，关联到 creator）
   settings           系统级 runtime 配置（key-value JSON）
   tasks              异步任务
   reports            产出报告元数据（正文在文件系统）
@@ -37,6 +39,43 @@ class KnowledgeGroup(SQLModel, table=True):
     updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 
+# ---------- 博主（跨平台聚合的全局身份）----------
+
+class Creator(SQLModel, table=True):
+    """博主的全局身份——一个真人跨多个平台、被多个组关注时，只有一条记录。
+
+    Source 通过 creator_id 关联到这里；观点档案按 creator_id 存文件，
+    同一博主无论被几个组关注都共用一份档案。
+    """
+    __tablename__ = "creators"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True)             # 统一显示名
+    slug: str = Field(unique=True, index=True)  # URL / 文件名用
+    bio: str = ""                             # 简介（未来抓取填充）
+    avatar_url: str = ""                      # 头像（未来抓取填充）
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+class CreatorAlias(SQLModel, table=True):
+    """博主的平台账号映射：(platform, platform_uid) → creator_id
+
+    创建 source 时按此表查：命中则关联已有 creator，未命中则新建 creator + alias。
+    实现跨平台聚合与跨组去重。
+    """
+    __tablename__ = "creator_aliases"
+    __table_args__ = (
+        UniqueConstraint("platform", "platform_uid", name="uq_creator_alias"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    creator_id: int = Field(foreign_key="creators.id", index=True)
+    platform: str = Field(index=True)         # douyin / wechat / xhs
+    platform_uid: str = Field(index=True)     # 该平台唯一 ID（如抖音 sec_uid）
+    display_name: str = ""                    # 该平台的昵称（可能与 creator.name 不同）
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
 # ---------- 订阅源 ----------
 
 class Source(SQLModel, table=True):
@@ -45,6 +84,9 @@ class Source(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     group_id: int = Field(foreign_key="knowledge_groups.id", index=True)
+
+    # 关联到全局博主身份（NULL = 尚未关联，keyword 类型永远 NULL）
+    creator_id: Optional[int] = Field(default=None, foreign_key="creators.id", index=True)
 
     type: str = Field(index=True)             # creator / keyword
     platform: str = Field(index=True)         # douyin / ...

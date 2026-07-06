@@ -39,14 +39,19 @@ def research_dir_for_task(task_id: str) -> Path:
     return settings.research_dir / task_id
 
 
+def profiles_dir() -> Path:
+    """knowledge/profiles/ - 全局观点档案目录（按 creator_id，跨组共用）"""
+    return settings.knowledge_dir / "profiles"
+
+
+def profile_path(creator_id: int) -> Path:
+    """knowledge/profiles/{creator_id}.md - 某博主的观点档案（全局唯一）"""
+    return profiles_dir() / f"{creator_id}.md"
+
+
 def profiles_dir_for_group(group_slug: str) -> Path:
-    """knowledge/{group_slug}/profiles/ - 该组下各 source 的观点档案目录"""
+    """[已废弃] 旧路径 knowledge/{group_slug}/profiles/，仅为迁移兼容保留"""
     return settings.knowledge_dir / group_slug / "profiles"
-
-
-def profile_path(group_slug: str, source_id: int) -> Path:
-    """knowledge/{group_slug}/profiles/{source_id}.md - 单个 source 的观点档案"""
-    return profiles_dir_for_group(group_slug) / f"{source_id}.md"
 
 
 def content_filename(content_id: str, create_time: Optional[str], ext: str) -> str:

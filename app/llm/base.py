@@ -29,3 +29,10 @@ class LLMClient(ABC):
     def chat(self, messages: list[LLMMessage], *, config: LLMConfig) -> str:
         """同步 chat 调用，返回 assistant 文本"""
         ...
+
+    def embed(self, texts: list[str], *, config: LLMConfig) -> list[list[float]]:
+        """文本向量化（用于未来 RAG 检索）。默认抛 NotImplementedError，子类按需实现。
+
+        预留接口：现阶段不实现，等知识库问答（阶段 B）需要向量检索时再补。
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support embed()")

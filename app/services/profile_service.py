@@ -50,23 +50,32 @@ _EMPTY_PROFILE = """# 观点档案
 
 
 class ProfileManager:
-    """单个 source（博主）的观点档案读写 + LLM 增量更新"""
+    """博主的观点档案读写 + LLM 增量更新。
+
+    档案按 creator_id 全局存储（knowledge/profiles/{creator_id}.md），
+    同一博主即使被多个组关注也共用一份档案。
+    """
 
     def __init__(self):
         self.llm = OpenAICompatClient()
 
     @staticmethod
-    def _resolve(source: Source) -> tuple[str, int]:
-        """从 source 解析出 (group_slug, source_id) 用于定位档案文件"""
+    def _creator_id_of(source: Source) -> Optional[int]:
+        """取 source 关联的 creator_id；没有则按 (platform, identifier) 现查"""
+        if source.creator_id:
+            return source.creator_id
+        # 兜底：老 source 可能 creator_id 未回填，现查 alias
+        from app.db.repos import CreatorRepo
         with get_session() as s:
-            group = GroupRepo(s).get(source.group_id)
-        slug = group.slug if group else str(source.group_id)
-        return slug, source.id
+            creator = CreatorRepo(s).find_by_platform_uid(source.platform, source.identifier)
+            return creator.id if creator else None
 
     def load(self, source: Source) -> str:
         """读档案；不存在则返回空骨架"""
-        slug, sid = self._resolve(source)
-        path = paths.profile_path(slug, sid)
+        cid = self._creator_id_of(source)
+        if cid is None:
+            return _EMPTY_PROFILE
+        path = paths.profile_path(cid)
         if path.exists():
             return path.read_text(encoding="utf-8")
         return _EMPTY_PROFILE
@@ -86,12 +95,14 @@ class ProfileManager:
         if not new_points:
             return self.load(source)
 
-        slug, sid = self._resolve(source)
-        path = paths.profile_path(slug, sid)
+        cid = self._creator_id_of(source)
+        if cid is None:
+            return self.load(source)
+        path = paths.profile_path(cid)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        # 按 source 加锁：同一博主的档案串行更新，不同博主可并行
-        with _get_profile_lock(sid):
+        # 按 creator 加锁：同一博主的档案串行更新，不同博主可并行
+        with _get_profile_lock(cid):
             current = self.load(source)
             date_str = date or datetime.now().strftime("%Y-%m-%d")
             new_points_block = "\n".join(f"- {p}" for p in new_points)

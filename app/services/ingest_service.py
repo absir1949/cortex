@@ -119,12 +119,18 @@ class IngestService:
                     file_size = 0
                     final_path = None
 
-                # 转录
+                # 转录（先查全局缓存：同一内容被多个组关注时不重复转录，省钱）
                 transcript = None
                 if config.get("transcribe_enabled", True) and c.should_transcribe() and final_path:
                     try:
-                        from app.transcribe import transcribe_video
-                        transcript = transcribe_video(str(final_path))
+                        from app.storage.cache import ContentCache
+                        cached = ContentCache().get_transcript(c.content_id)
+                        if cached:
+                            transcript = cached
+                            self._log(log_cb, f"  [cache] 转录命中全局缓存，复用")
+                        else:
+                            from app.transcribe import transcribe_video
+                            transcript = transcribe_video(str(final_path))
                         storage.save_transcript(c.content_id, transcript, c.create_time)
                     except Exception as e:
                         self._log(log_cb, f"  [warn] 转录失败 {c.title[:30]}: {e}")

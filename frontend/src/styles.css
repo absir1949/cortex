@@ -356,6 +356,16 @@ button:disabled {
   color: #149b68;
 }
 
+/* 博主列表项的可点击链接（头像/名字）*/
+.follow-link {
+  text-decoration: none;
+  color: inherit;
+  transition: opacity 0.15s;
+}
+.follow-link:hover {
+  opacity: 0.7;
+}
+
 /* ===== 信号面板（时间流 + 视觉分层）===== */
 
 /* 信号流容器 */

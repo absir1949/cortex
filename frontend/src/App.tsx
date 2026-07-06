@@ -1,6 +1,8 @@
 import { NavLink, Route, Routes } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
+import GroupLayout from './layouts/GroupLayout'
 import GroupDetail from './pages/GroupDetail'
+import CreatorDetail from './pages/CreatorDetail'
 import ResearchForm from './pages/ResearchForm'
 import TaskProgress from './pages/TaskProgress'
 import ReportView from './pages/ReportView'
@@ -41,7 +43,10 @@ export default function App() {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/groups/:id" element={<GroupDetail />} />
+          <Route path="/groups/:id" element={<GroupLayout />}>
+            <Route index element={<GroupDetail />} />
+            <Route path="creators/:sid" element={<CreatorDetail />} />
+          </Route>
           <Route path="/groups/:id/research" element={<ResearchForm />} />
           <Route path="/tasks" element={<TasksList />} />
           <Route path="/tasks/:id" element={<TaskProgress />} />

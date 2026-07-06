@@ -115,7 +115,7 @@ def get_group_insights(group_id: int, days: Optional[int] = Query(None, ge=1, le
 
 @router.get("/groups/{group_id}/profile/{source_id}", response_class=PlainTextResponse)
 def get_source_profile(group_id: int, source_id: int):
-    """读单个 source 的观点档案（markdown 原文）"""
+    """读博主的观点档案（markdown 原文）。档案按 creator 全局存储。"""
     with get_session() as s:
         group = GroupRepo(s).get(group_id)
         src = SourceRepo(s).get(source_id)
@@ -123,7 +123,9 @@ def get_source_profile(group_id: int, source_id: int):
         raise HTTPException(404, "group not found")
     if not src or src.group_id != group_id:
         raise HTTPException(404, "source not found in this group")
-    path = paths.profile_path(group.slug, src.id)
+    if not src.creator_id:
+        return f"# {src.display_name} 的观点档案\n\n（尚未关联博主身份，采集后会自动建立）"
+    path = paths.profile_path(src.creator_id)
     if not path.exists():
         return f"# {src.display_name} 的观点档案\n\n（尚未建立档案，采集后会自动生成）"
     return path.read_text(encoding="utf-8")

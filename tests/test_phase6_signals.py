@@ -32,17 +32,27 @@ def _session() -> Session:
 
 
 def _make_group_and_source(slug: str = "wx-shop"):
-    """造一个 group + source 的辅助。返回 (group_id, source_id) 避免 detached 对象问题。
+    """造一个 group + source + creator 的辅助。返回 (group_id, source_id)。
 
-    slug 用于隔离档案文件路径（不同测试传不同 slug，避免真实 knowledge/ 目录污染）。
+    slug 用于隔离档案文件路径。每个测试用不同 slug 避免污染。
+    source 会关联到一个 creator（观点档案按 creator_id 全局存储）。
     """
+    from app.db.repos import CreatorRepo
     with _session() as s:
         group = GroupRepo(s).create(KnowledgeGroup(name="微信小店", slug=slug))
+        # 给每个测试唯一的 identifier，避免 creator 冲突
+        identifier = f"MS4_test_{slug}"
+        creator = CreatorRepo(s).get_or_create(
+            platform="douyin",
+            platform_uid=identifier,
+            display_name="测试博主",
+        )
         src = SourceRepo(s).create(Source(
             group_id=group.id,
+            creator_id=creator.id,
             type=SourceType.CREATOR.value,
             platform="douyin",
-            identifier="MS4_test",
+            identifier=identifier,
             display_name="测试博主",
             directory=f"{slug}/creator-test",
         ))

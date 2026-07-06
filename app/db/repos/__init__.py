@@ -6,6 +6,7 @@ from .task_repo import TaskRepo
 from .report_repo import ReportRepo
 from .analyzed_repo import AnalyzedRepo
 from .signal_repo import SignalRepo
+from .creator_repo import CreatorRepo
 
 __all__ = [
     "GroupRepo",
@@ -15,4 +16,5 @@ __all__ = [
     "ReportRepo",
     "AnalyzedRepo",
     "SignalRepo",
+    "CreatorRepo",
 ]

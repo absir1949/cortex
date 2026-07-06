@@ -5,6 +5,7 @@ import { useGroups, useCreateGroup } from '../api/groups'
 import { useRecentReports } from '../api/reports'
 import { useSchedulerJobs } from '../api/scheduler'
 import { useRecentNewSignals, useGroupInsights } from '../api/signals'
+import SignalItem from '../components/SignalItem'
 import { api } from '../api/client'
 
 function formatTime(value?: string | null) {
@@ -135,28 +136,7 @@ export default function Dashboard() {
           {newSignals.length > 0 && (
             <div className="signal-feed">
               {newSignals.map((s) => (
-                <article className="signal-item" key={s.id}>
-                  <div className="signal-item-head">
-                    <span className="signal-item-badge">🆕</span>
-                    <span className="signal-item-summary">{s.summary || '（无摘要）'}</span>
-                  </div>
-                  {s.new_points && s.new_points.length > 0 && (
-                    <ul className="signal-points">
-                      {s.new_points.map((p, i) => <li key={i}>{p}</li>)}
-                    </ul>
-                  )}
-                  <div className="signal-meta">
-                    <span>{s.source_name || '博主'}</span>
-                    <span>·</span>
-                    <span>{formatTime(s.created_at)}</span>
-                    {s.url && (
-                      <>
-                        <span>·</span>
-                        <a href={s.url} target="_blank" rel="noreferrer">看原视频 ↗</a>
-                      </>
-                    )}
-                  </div>
-                </article>
+                <SignalItem key={s.id} signal={s} />
               ))}
             </div>
           )}

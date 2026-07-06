@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Optional
 from app.db.engine import get_session
-from app.db.repos import GroupRepo, SourceRepo
+from app.db.repos import GroupRepo, SourceRepo, CreatorRepo
 from app.db.schema import Source, KnowledgeGroup
 from app.models.group import SourceType
 from app.storage.paths import slugify
@@ -68,7 +68,17 @@ class SourceService:
                 comment_top_n=comment_top_n,
                 directory=directory,
             )
-            return SourceRepo(s).create(src)
+            src = SourceRepo(s).create(src)
+            # creator 类型：关联到全局博主身份（跨平台聚合 + 跨组去重）
+            if type_value == SourceType.CREATOR.value:
+                creator = CreatorRepo(s).get_or_create(
+                    platform=platform,
+                    platform_uid=resolved_identifier,
+                    display_name=resolved_name or resolved_identifier,
+                )
+                src.creator_id = creator.id
+                SourceRepo(s).update(src)
+            return src
 
     @staticmethod
     def _resolve_douyin_creator(identifier: str, display_name: str = "") -> tuple[str, str]:
