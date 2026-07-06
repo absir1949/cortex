@@ -281,6 +281,19 @@ button:disabled {
   @apply rounded-[1.25rem] border border-border bg-panel p-6 shadow-sm;
 }
 
+.signal-strip {
+  @apply rounded-[1.25rem] border border-border bg-panel p-6 shadow-sm;
+}
+
+/* 趋势/信号列表分组之间的分隔标题 */
+.signal-strip .group-label {
+  @apply text-xs font-semibold text-accentAlt uppercase tracking-wide;
+  margin-top: 1rem;
+}
+.signal-strip .group-label:first-child {
+  margin-top: 0;
+}
+
 .brief-list {
   @apply mt-4 divide-y divide-border;
 }
@@ -300,6 +313,47 @@ button:disabled {
 
 .brief-row small {
   @apply text-xs text-muted text-right;
+}
+
+/* brief-row 里的副标题（趋势的博主/势头行） */
+.brief-row .brief-row-sub {
+  @apply block text-left text-xs text-muted;
+  margin-top: 2px;
+}
+
+/* 信号行：两列（内容 + 标记），窄屏塌成单列 */
+.brief-row-compact {
+  grid-template-columns: minmax(0, 1fr) 60px;
+}
+@media (max-width: 768px) {
+  .brief-row-compact {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* GroupDetail 行业趋势小结卡 */
+.insight-card {
+  margin-bottom: 1rem;
+  padding: 0.75rem 0.875rem;
+  border-radius: 0.75rem;
+  background: rgba(20, 155, 104, 0.06);
+  border: 1px solid rgba(20, 155, 104, 0.2);
+}
+.insight-card-head {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #149b68;
+  margin-bottom: 0.5rem;
+}
+.insight-card-row {
+  font-size: 0.8125rem;
+  margin-bottom: 0.375rem;
+}
+.insight-card-row .muted {
+  color: #66756d;
+}
+.insight-card-row .accent {
+  color: #149b68;
 }
 
 .tiny-note,

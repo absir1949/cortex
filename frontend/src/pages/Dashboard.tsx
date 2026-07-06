@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useGroups, useCreateGroup } from '../api/groups'
 import { useRecentReports } from '../api/reports'
 import { useSchedulerJobs } from '../api/scheduler'
+import { useRecentNewSignals, useGroupInsights } from '../api/signals'
 import { api } from '../api/client'
 
 function formatTime(value?: string | null) {
@@ -26,6 +27,7 @@ export default function Dashboard() {
   const { data: groups = [], isLoading } = useGroups()
   const { data: recent = [] } = useRecentReports(12)
   const { data: jobs = [] } = useSchedulerJobs()
+  const { data: newSignals = [] } = useRecentNewSignals(8)
   const createGroup = useCreateGroup()
   const qc = useQueryClient()
 
@@ -34,6 +36,9 @@ export default function Dashboard() {
   const [question, setQuestion] = useState('')
   const [selectedGroupId, setSelectedGroupId] = useState<number | ''>('')
   const [notice, setNotice] = useState('')
+
+  const { data: insights } = useGroupInsights(selectedGroupId || undefined, 14)
+  const trends = insights?.trends ?? []
 
   useEffect(() => {
     if (!selectedGroupId && groups[0]) setSelectedGroupId(groups[0].id)
@@ -97,6 +102,51 @@ export default function Dashboard() {
           )}
         </div>
       </section>
+
+      {(trends.length > 0 || newSignals.length > 0) && (
+        <section className="signal-strip">
+          <div>
+            <span className="soft-label">NEW SIGNALS</span>
+            <h2>博主们最近讲了什么新的</h2>
+            <p>系统读过的、判断为「新观点」的内容，重复的已自动过滤。</p>
+          </div>
+          {trends.length > 0 && (
+            <div className="group-label">🌐 跨博主趋势（基于「{groups.find((g) => g.id === selectedGroupId)?.name || '当前专题'}」近 14 天）</div>
+          )}
+          {trends.length > 0 && (
+            <div className="brief-list">
+              {trends.map((t) => (
+                <div className="brief-row" key={`trend-${t.trend}`}>
+                  <span>{t.signal_count >= 3 || /升温/.test(t.momentum) ? '🔥' : '📈'}</span>
+                  <div>
+                    <strong>{t.trend}</strong>
+                    {t.source_names.length > 0 && (
+                      <small className="brief-row-sub">
+                        {t.source_names.join('、')} 都在讲 · {t.momentum}
+                      </small>
+                    )}
+                  </div>
+                  <small>{t.signal_count} 信号</small>
+                </div>
+              ))}
+            </div>
+          )}
+          {newSignals.length > 0 && trends.length > 0 && (
+            <div className="group-label">单博主新观点（全部专题）</div>
+          )}
+          {newSignals.length > 0 && (
+            <div className="brief-list">
+              {newSignals.map((s) => (
+                <div className="brief-row" key={s.id}>
+                  <span>{s.source_name || '博主'}</span>
+                  <strong>{s.summary || '（无摘要）'}</strong>
+                  <small>{formatTime(s.created_at)}</small>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="ask-bar">
         <div>

@@ -90,3 +90,17 @@ export interface SchedulerJob {
   name: string
   next_run: string | null
 }
+
+export interface Signal {
+  id: number
+  group_id: number | null
+  source_id: number
+  content_id: string
+  is_new: boolean
+  summary: string
+  matched_points: string[]
+  new_points: string[]
+  created_at: string
+  source_name?: string
+  platform?: string
+}

@@ -1,41 +1,68 @@
-# Cortex - 内容智能采集系统
+# Cortex - 行业情报助手
 
-自动监控内容创作者，下载视频、语音转文字、AI 知识提取。
+自动监控一批内容创作者，下载视频、语音转文字、用 AI 提炼观点。带记忆：能判断博主这次讲的是**新观点**还是**老调重弹**，让你只看真正变化。
 
 ## 特性
 
-- 🎥 **自动下载** - 支持多平台（抖音、更多开发中...）
-- 🎤 **语音转文字** - 阿里云百炼 ASR，准确率高
-- 📅 **智能命名** - `{日期}_{视频ID}` 格式，按时间排序
-- 🔄 **自动去重** - 基于视频 ID，不重复下载
-- ⏰ **定时监控** - APScheduler 定时调度
-- 🧠 **知识提取** - AI 分析所有内容生成知识报告
-- 📦 **轻量级** - 独立系统，无需复杂依赖
+- 🧠 **观点记忆** - 每个博主维护一份持续更新的观点档案，自动过滤重复内容
+- 🆕 **新信号识别** - 新视频进来先比对档案，是"新的"才进日报重点
+- 🎥 **自动采集** - 多平台（抖音已支持，更多开发中），基于视频 ID 去重
+- 🎤 **语音转文字** - 阿里云百炼 ASR
+- 🔍 **按需研究** - 临时提问，系统自动搜内容、转录、用证据回答
+- ⏰ **定时调度** - APScheduler 按知识组触发，组内多源并行
+- 🌐 **Web 界面** - FastAPI + React SPA，浏览器里完成一切
+
+## 架构
+
+```
+cortex/
+├── app/                    # 主应用（FastAPI）
+│   ├── main.py             # 入口：lifespan + 路由 + 静态托管
+│   ├── settings.py         # 环境变量/secrets
+│   ├── api/                # REST 端点：groups/sources/research/tasks/reports/config/signals
+│   ├── services/           # 业务层：ingest/research/knowledge/signal/profile/...
+│   ├── tasks/              # 异步任务执行器（ThreadPool）+ handler 注册表
+│   ├── platforms/          # 平台适配器（base + douyin）
+│   ├── storage/            # 文件系统 + 缓存 + 路径
+│   ├── llm/                # OpenAI 兼容客户端（DeepSeek/OpenAI/千问/智谱...）
+│   ├── scheduler/          # APScheduler 定时触发
+│   ├── transcribe/         # 阿里云百炼 ASR
+│   ├── db/                 # SQLModel 表 + Repo + 迁移
+│   ├── models/             # 跨层共享枚举
+│   ├── notify/             # 飞书 Bee 通知（可选）
+│   ├── cli/                # 薄 CLI（调试用）：python -m app.cli
+│   └── web/static/         # 前端构建产物（gitignore，构建生成）
+├── frontend/               # React SPA（Vite + TanStack Query + Tailwind）
+│   └── src/pages/          # Dashboard/GroupDetail/ResearchForm/ReportView/Settings/...
+├── data/                   # 采集产物（每条内容三件套：mp4/txt/json）
+├── knowledge/              # 知识报告 + 观点档案
+├── research/               # 按需研究产出
+├── state/cortex.db         # SQLite（groups/sources/tasks/reports/signals/...）
+├── migrations/             # 一次性历史数据迁移脚本（已跑过）
+├── tests/                  # pytest（phase1-6）
+├── requirements.txt
+├── Dockerfile / docker-compose.yml
+└── .env
+```
 
 ## 安装
 
 ```bash
-# 1. 进入项目目录
+# 1. 进入项目
 cd ~/code/mcp/cortex
 
-# 2. 创建虚拟环境
+# 2. 虚拟环境
 python -m venv .venv
 source .venv/bin/activate
 
-# 3. 安装依赖（注意版本）
+# 3. Python 依赖
 pip install -r requirements.txt
-```
 
-**重要依赖版本**（已测试）：
-```
-alibabacloud-oss-v2==1.2.1
-alibabacloud-sts20150401==1.1.6
-dashscope==1.25.1
+# 4. 前端依赖（如需改前端）
+cd frontend && npm install && cd ..
 ```
 
 ## 配置
-
-### 1. 环境变量
 
 复制 `.env.example` 为 `.env`：
 
@@ -43,229 +70,112 @@ dashscope==1.25.1
 cp .env.example .env
 ```
 
-需要配置的密钥：
+需要的环境变量：
 
-| 配置项 | 说明 | 获取方式 |
-|--------|------|----------|
-| `TIKHUB_API_KEY` | 抖音 API | https://api.tikhub.io |
-| `BAILIAN_API_KEY` | 阿里云百炼 | 阿里云控制台 |
-| `ALIYUN_ACCESS_KEY_ID` | 阿里云 AK | 阿里云控制台 |
-| `ALIYUN_ACCESS_KEY_SECRET` | 阿里云 SK | 阿里云控制台 |
-| `ALIYUN_STS_ROLE_ARN` | STS 角色 | 阿里云控制台 |
-| `OSS_BUCKET` | OSS Bucket | 阿里云控制台 |
-| `OSS_REGION` | OSS 区域 | 如 `oss-cn-beijing` |
-| `DEEPSEEK_API_KEY` | AI 总结 | DeepSeek 开放平台 |
+| 配置项 | 说明 |
+|--------|------|
+| `TIKHUB_API_KEY` | 抖音 API（https://api.tikhub.io） |
+| `BAILIAN_API_KEY` | 阿里云百炼（语音识别） |
+| `ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET` | 阿里云 AK/SK |
+| `ALIYUN_STS_ROLE_ARN` / `OSS_BUCKET` / `OSS_REGION` | OSS 转录用 |
+| `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | LLM（默认 DeepSeek，可在 Web 设置页改） |
 
-### 2. 创作者配置
+> `DEEPSEEK_API_KEY` / `DEEPSEEK_API_URL` 老字段仍兼容（`LLM_*` 没配时回退）。
 
-使用命令添加：
+LLM、采集参数、prompt 模板都可在 **Web 设置页**热改，不用重启。
 
-```bash
-python cli.py add <昵称> <平台> <ID> [间隔小时数]
+## 运行
 
-# 示例：添加抖音创作者，每48小时检查一次
-python cli.py add 九栢米电商 douyin MS4wLjABAAAA... 48
-```
-
-或直接编辑 `creators.json`：
-
-```json
-{
-  "creators": [
-    {
-      "name": "九栢米电商",
-      "platform": "douyin",
-      "id": "MS4wLjABAAAAi2lM8Jn9_RdVZ2dDZPIBDQEXRTth11EVqpdPCerS3dc",
-      "interval_hours": 48,
-      "enabled": true,
-      "directory": "MS4wLjAB_九栢米电商"
-    }
-  ]
-}
-```
-
-**支持平台**：
-- `douyin` - 抖音
-
-## 使用
-
-### 命令列表
+### 开发模式（前后端分离）
 
 ```bash
-# 添加创作者
-python cli.py add <昵称> <平台> <ID> [间隔]
+# 后端（终端 1）
+uvicorn app.main:app --reload --port 8080
 
-# 列出所有创作者
-python cli.py list
-
-# 删除创作者
-python cli.py remove <昵称>
-
-# 运行一次（下载新视频 + 转录）
-python cli.py run
-
-# 给已下载视频补充转录
-python cli.py transcribe
-
-# 启动定时监控
-python cli.py start
-
-# 停止监控
-python cli.py stop
-
-# 查看状态
-python cli.py status
-
-# 查看已处理视频
-python cli.py videos                    # 所有创作者
-python cli.py videos "九栢米电商"      # 特定创作者
-
-# 生成知识报告
-python cli.py knowledge
+# 前端（终端 2，自动代理 /api 到 8080）
+cd frontend && npm run dev
+# 打开 http://localhost:5173
 ```
 
-### 使用流程
-
-#### 1. 初次使用
+### 生产模式（前端构建后由 FastAPI 托管）
 
 ```bash
-# 添加创作者
-python cli.py add 九栢米电商 douyin MS4wLjABAAAA...
+# 构建前端
+cd frontend && npm run build
 
-# 运行一次，下载历史视频
-python cli.py run
+# 拷贝产物到后端静态目录
+cp -r dist/* ../app/web/static/
+
+# 启动
+cd ..
+uvicorn app.main:app --port 8080
+# 打开 http://localhost:8080
 ```
 
-#### 2. 补充转录
-
-如果之前跳过了转录，可以补充：
+### Docker
 
 ```bash
-python cli.py transcribe
+docker compose up -d
+# 打开 http://localhost:8080
 ```
 
-#### 3. 定时监控
+## 核心概念
+
+- **知识组（Group）** - 一个关注主题，如"微信小店"。有自己的采集节奏和配置
+- **订阅源（Source）** - 组下的创作者或关键词。`creator` 类型拉博主作品，`keyword` 类型按词搜索
+- **任务（Task）** - 异步执行单元（采集/研究/转录补全），有进度日志、可取消
+- **报告（Report）** - 产出的 markdown 简报（定时日报 / 按需研究）
+- **信号（Signal）** - 每条内容贡献的观点判定：新观点还是老调重弹
+- **观点档案（Profile）** - 每个博主持续更新的观点沉淀（文件系统，group 级）
+
+## 使用流程
+
+1. 打开 Web 界面 → 「订阅新专题」创建知识组
+2. 进专题页 → 添加抖音博主（sec_user_id）或关键词
+3. 系统按节奏自动采集 → 转录 → 抓评论 → 观点判定 → 生成日报
+4. 首页「今日简报」读结论，「本期新信号」看博主讲了什么新的
+5. 临时有问题 → 首页追问栏直接提问，系统搜内容、用证据回答
+
+## CLI（调试用）
 
 ```bash
-# 启动定时任务（按配置的间隔自动检查）
-python cli.py start
+python -m app.cli serve --reload          # 启动服务
+python -m app.cli groups                  # 列知识组
+python -m app.cli sources <slug>          # 列组下源
+python -m app.cli run <slug>              # 手动跑一次采集+分析
+python -m app.cli search douyin "关键词"   # 直接搜抖音（调试）
+python -m app.cli research "问题"         # 按需研究（阻塞，调试）
+python -m app.cli migrate                 # 数据迁移
 ```
 
-按 `Ctrl+C` 停止。
+## 添加新平台
 
-#### 4. 查看结果
+在 `app/platforms/` 下新建文件，继承 `PlatformAdapter`，声明 `capabilities()` 并实现对应方法：
 
-```bash
-# 查看已处理的视频
-python cli.py videos
+```python
+from app.platforms.base import PlatformAdapter, Capability
 
-# 查看转录内容
-cat data/MS4wLjAB_九栢米电商/2025-12-22_7586614939215367461.txt
+class XiaohongshuAdapter(PlatformAdapter):
+    platform = "xiaohongshu"
+
+    def capabilities(self) -> set[Capability]:
+        return {Capability.SEARCH, Capability.FETCH_COMMENTS}
+
+    def search(self, query, limit=20, days=7):
+        ...
 ```
 
-## 文件结构
-
-```
-cortex/
-├── cli.py              # 命令行入口
-├── config.py           # 配置管理
-├── scheduler.py        # 核心处理逻辑
-├── storage.py          # 文件存储管理
-├── transcriber.py      # 语音转文字（阿里云百炼）
-├── knowledge.py        # AI 知识提取
-├── platforms/          # 平台适配器
-│   ├── __init__.py
-│   ├── base.py         # PlatformAdapter 基类
-│   └── douyin.py       # 抖音实现
-├── data/               # 数据目录
-│   └── {ID前8位}_昵称/  # 创作者目录
-│       ├── 2025-12-22_{视频ID}.mp4    # 视频
-│       ├── 2025-12-22_{视频ID}.txt    # 转录文本
-│       └── 2025-12-22_{视频ID}.json   # 元数据
-├── knowledge/          # 知识报告目录
-├── creators.json       # 创作者配置
-├── .env                # 环境变量
-└── requirements.txt    # 依赖列表
-```
-
-## 数据命名规范
-
-### 目录名：`{ID前8位}_{昵称}`
-- 示例：`MS4wLjAB_九栢米电商`
-- 优点：唯一标识 + 可读性
-
-### 文件名：`{日期}_{视频ID}.{扩展名}`
-- 示例：`2025-12-22_7586614939215367461.mp4`
-- 优点：
-  - ✅ 按时间自动排序
-  - ✅ 唯一标识（基于视频 ID）
-  - ✅ 不依赖创作者昵称
+在 `app/platforms/__init__.py` 的 `_adapters` 注册即可。
 
 ## 开发
 
-### 添加新平台
-
-1. 在 `platforms/` 下创建新文件（如 `xiaohongshu.py`）
-2. 继承 `PlatformAdapter` 基类
-3. 实现以下方法：
-
-```python
-from platforms.base import PlatformAdapter
-
-class XiaohongshuAdapter(PlatformAdapter):
-    def fetch_videos(self, creator_id: str, count: int = 20) -> List[Video]:
-        # 获取视频列表
-        pass
-
-    def download_video(self, video: Video, output_path: str) -> bool:
-        # 下载视频
-        pass
-```
-
-4. 在 `platforms/__init__.py` 中注册
-
-## 常见问题
-
-### Q: 转录失败，提示 CRC 错误？
-
-**A**: 网络问题导致 OSS 上传失败。重试即可：
-
 ```bash
-python cli.py transcribe
+# 跑测试
+pytest
+
+# API 文档
+# 启动后访问 http://localhost:8080/docs
 ```
-
-已成功的会自动跳过。
-
-### Q: 如何批量添加创作者？
-
-**A**: 直接编辑 `creators.json` 文件：
-
-```json
-{
-  "creators": [
-    {"name": "创作者1", "platform": "douyin", "id": "...", "interval_hours": 48, "enabled": true},
-    {"name": "创作者2", "platform": "douyin", "id": "...", "interval_hours": 48, "enabled": true}
-  ]
-}
-```
-
-### Q: 视频下载失败？
-
-**A**: 可能原因：
-1. TikHub API 密钥无效
-2. 视频已被创作者删除
-3. 网络问题
-
-### Q: 如何只下载不转录？
-
-**A**: 暂时没有命令行参数，可以直接修改 `scheduler.py` 中的 `skip_transcribe` 参数。
-
-### Q: 转录速度慢？
-
-**A**: 每个视频需要：
-1. 提取音频（几秒）
-2. 上传到 OSS（取决于网速）
-3. 阿里云百炼处理（通常 30-60 秒）
 
 ## License
 

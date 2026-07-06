@@ -32,6 +32,7 @@ from app.api import research as research_api
 from app.api import tasks as tasks_api
 from app.api import reports as reports_api
 from app.api import config as config_api
+from app.api import signals as signals_api
 from app.tasks import get_runner
 from app.tasks.handlers import ingest_handler, research_handler  # noqa: F401 注册 handlers
 from app.scheduler import get_scheduler
@@ -83,10 +84,13 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS（前端 dev 用 5173，生产同源不需要）
+    # CORS（前端 dev 用 5180，生产同源不需要）
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=[
+            "http://localhost:5180", "http://127.0.0.1:5180",  # dev（热重载）
+            "http://localhost:5173", "http://127.0.0.1:5173",  # 兼容老端口
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -99,6 +103,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks_api.router)
     app.include_router(reports_api.router)
     app.include_router(config_api.router)
+    app.include_router(signals_api.router)
 
     # 调度器管理（热重载 job 定义）
     @app.post("/api/scheduler/reload")

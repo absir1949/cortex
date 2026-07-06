@@ -37,6 +37,11 @@ SYSTEM_DEFAULTS: dict[str, Any] = {
     # 研究
     "research_timeout_sec": 900,
     "research_search_limit": 10,
+    # 观点去重
+    "signal_min_new_points": 1,   # 至少提取到几个新观点才算「新信号」
+    # 跨博主洞察
+    "insight_lookback_days": 14,  # 趋势回看天数
+    "insight_min_sources": 2,     # 至少几个博主同时讲才算趋势
     # prompt
     "analysis_prompt_template": (
         "以下是电商创作者「{creator_name}」最近发布的 {content_count} 条短视频内容。\n\n"
@@ -58,6 +63,66 @@ SYSTEM_DEFAULTS: dict[str, Any] = {
         "3. 如有不同观点或矛盾，分别呈现\n"
         "4. 如证据不足以回答，直接说明\n\n"
         "{evidence_block}"
+    ),
+    # 观点判定：拿博主现有档案当上下文，判断这条内容是「新观点」还是「老调重弹」
+    "signal_judge_prompt_template": (
+        "你是电商行业分析师。下面是创作者「{author}」的一条新视频内容，"
+        "以及该作者此前的「观点档案」（记录了他讲过的所有观点）。\n\n"
+        "请判断：这条视频讲的观点，是否已经在档案里出现过？\n\n"
+        "判定规则：\n"
+        "- 换个说法但本质相同的观点 = 已出现（如\"选品最重要\"和\"选品决定80%成败\"是同一条）\n"
+        "- 有新的数据、新的方法、新的案例、立场转变 = 新观点\n"
+        "- 完全没在档案里出现过的观点 = 新观点\n\n"
+        "[作者观点档案]\n{profile}\n\n"
+        "[本条视频原话]\n{transcript}\n\n"
+        "[观众评论摘要]\n{comments}\n\n"
+        "请严格按以下 JSON 格式输出（不要输出任何其他内容，不要 markdown 代码块）：\n"
+        "{{\n"
+        '  "summary": "用一句话概括这条视频的核心观点",\n'
+        '  "is_new": true或false,\n'
+        '  "matched_points": ["命中的已有观点，每条一行。空则 []"],\n'
+        '  "new_points": ["本次新贡献的观点，每条一行。空则 []"\n'
+        "}}"
+    ),
+    # 档案更新：把新观点合并进现有档案
+    "profile_update_prompt_template": (
+        "你是电商行业分析师。创作者「{author}」发布了新内容，产生了若干新观点。"
+        "请把这些新观点合并进他的现有观点档案。\n\n"
+        "更新规则：\n"
+        "1. 保留档案原有结构（核心方法论 / 反复强调 / 最近转变 / 已讲过的点）\n"
+        "2. 新观点归入最合适的段落；如果有观点升级/转变，标注日期\n"
+        "3. 「反复强调」段落记录观点出现次数\n"
+        "4. 不要删除已有内容，只做增量合并\n"
+        "5. 输出完整的更新后档案（markdown），不要输出解释\n\n"
+        "[现有档案]\n{profile}\n\n"
+        "[本次新观点]\n{new_points}\n\n"
+        "[本次内容摘要]\n{summary}\n\n"
+        "[日期]\n{date}"
+    ),
+    # 跨博主趋势提炼：把多个博主的新观点放一起，找出共同趋势
+    "insight_prompt_template": (
+        "你是电商行业分析师。下面是「{group_name}」这个专题下，"
+        "多位创作者最近 {days} 天内的所有新观点（已按博主分组）。\n\n"
+        "请找出**被多个博主同时提到的共同趋势**——这些往往是正在形成的行业信号。\n\n"
+        "分析规则：\n"
+        "1. 只保留被至少 {min_sources} 个博主讲到的观点（单一博主的观点不算趋势）\n"
+        "2. 把本质相同的观点合并成一条趋势（如「选品重要」和「选品决定成败」是同一条）\n"
+        "3. 判断每条趋势的势头：↗ 升温（最近提到变多）/ → 稳定 / ↘ 降温\n"
+        "4. 简要说明为什么这条值得注意（业务含义）\n"
+        "5. 如果没有共同趋势，返回空 trends 数组\n\n"
+        "[各博主的新观点]\n{signals_block}\n\n"
+        "请严格按以下 JSON 格式输出（不要输出任何其他内容，不要 markdown 代码块）：\n"
+        "{{\n"
+        '  "trends": [\n'
+        "    {{\n"
+        '      "trend": "趋势名称，一句话",\n'
+        '      "source_names": ["讲到这个趋势的博主名"],\n'
+        '      "signal_count": 讲到这个趋势的信号总数(整数),\n'
+        '      "momentum": "↗ 升温 / → 稳定 / ↘ 降温",\n'
+        '      "why_hot": "为什么值得关注"\n'
+        "    }}\n"
+        "  ]\n"
+        "}}"
     ),
 }
 
@@ -99,6 +164,23 @@ def system_value(key: str, default: Any = None) -> Any:
     if key in SYSTEM_DEFAULTS:
         return SYSTEM_DEFAULTS[key]
     return default
+
+
+def system_int(key: str, default: int) -> int:
+    """安全取整型配置：转换失败（用户配了非法值）时回退到 default，不抛异常。
+
+    用于 signal_min_new_points / insight_lookback_days / insight_min_sources 等，
+    这些值若配错会让已付费的 LLM 调用白费，必须容错。
+    """
+    val = system_value(key, default)
+    try:
+        if isinstance(val, bool):
+            return int(val)
+        if isinstance(val, (int, float)):
+            return int(val)
+        return int(str(val).strip())
+    except (TypeError, ValueError):
+        return default
 
 
 def set_system_value(key: str, value: Any) -> None:

@@ -30,6 +30,15 @@ def _mig_001_init(session: Session) -> None:
     SQLModel.metadata.create_all(get_engine())
 
 
+# ============ Migration 003: 新增 signals 表 ============
+# （version 2 被根目录 migrations/002_*.py 一次性数据迁移占用，这里从 3 起）
+# create_all 幂等：已存在的表跳过，只建新增的 signals 表
+
+@register(3, "003_signals: 新增观点信号表（观点去重判定结果）")
+def _mig_003_signals(session: Session) -> None:
+    SQLModel.metadata.create_all(get_engine())
+
+
 # ============ 通用运行器 ============
 
 def current_version(session: Session) -> int:

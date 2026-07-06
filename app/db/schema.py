@@ -7,6 +7,7 @@
   tasks              异步任务
   reports            产出报告元数据（正文在文件系统）
   analyzed_content   已分析过的 content_id（增量分析，替代 .analyzed.json）
+  signals            每条内容的观点判定（新观点/老调重弹）+ 提炼的新观点
   prompt_history     prompt 修改历史（保留版本）
   schema_version     迁移版本号
 """
@@ -132,6 +133,32 @@ class AnalyzedContent(SQLModel, table=True):
     source_id: int = Field(foreign_key="sources.id", index=True)
     content_id: str = Field(index=True)
     analyzed_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+# ---------- 观点信号（去重判定结果）----------
+
+class Signal(SQLModel, table=True):
+    """每条内容贡献的观点判定结果
+
+    采集时逐条由 SignalService 产出：
+      is_new=True  → 这条内容带来了新观点，进日报重点
+      is_new=False → 老调重弹，不进日报重点
+    new_points / matched_points 是 LLM 给出的结构化判定依据。
+    """
+    __tablename__ = "signals"
+    __table_args__ = (UniqueConstraint("source_id", "content_id", name="uq_signal_content"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    group_id: Optional[int] = Field(default=None, foreign_key="knowledge_groups.id", index=True)
+    source_id: int = Field(foreign_key="sources.id", index=True)
+    content_id: str = Field(index=True)
+
+    is_new: bool = Field(default=False, index=True)
+    summary: str = ""                            # 这条内容的观点一句话摘要
+    matched_points: list = Field(default_factory=list, sa_column=Column(JSON))  # 命中的已有观点（去重证据）
+    new_points: list = Field(default_factory=list, sa_column=Column(JSON))      # 本次贡献的新观点
+
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 
 # ---------- Prompt 历史 ----------

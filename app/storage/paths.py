@@ -3,6 +3,7 @@
 目录布局：
   data/{group_slug}/{source_slug}/YYYY-MM-DD_{content_id}.{mp4|txt|json}
   knowledge/{group_slug}/knowledge_YYYYMMDD_HHMMSS.{md|json}
+  knowledge/{group_slug}/profiles/{source_id}.md   ← 观点档案（持续更新）
   research/{task_id}/{inputs/, comments/, report.md}
 """
 from __future__ import annotations
@@ -36,6 +37,16 @@ def knowledge_dir_for_group(group_slug: str) -> Path:
 
 def research_dir_for_task(task_id: str) -> Path:
     return settings.research_dir / task_id
+
+
+def profiles_dir_for_group(group_slug: str) -> Path:
+    """knowledge/{group_slug}/profiles/ - 该组下各 source 的观点档案目录"""
+    return settings.knowledge_dir / group_slug / "profiles"
+
+
+def profile_path(group_slug: str, source_id: int) -> Path:
+    """knowledge/{group_slug}/profiles/{source_id}.md - 单个 source 的观点档案"""
+    return profiles_dir_for_group(group_slug) / f"{source_id}.md"
 
 
 def content_filename(content_id: str, create_time: Optional[str], ext: str) -> str:

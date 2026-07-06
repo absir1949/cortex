@@ -12,4 +12,3 @@ services:
       - ./research:/app/research
       - ./backup:/app/backup
       - ./state:/app/state                 # SQLite 数据库（避免和 app/db Python 包冲突）
-      - ./creators.json:/app/creators.json:ro

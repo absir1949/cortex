@@ -11,6 +11,7 @@ import {
 } from '../api/groups'
 import { useGroupReports } from '../api/reports'
 import { useSchedulerJobs } from '../api/scheduler'
+import { useGroupSignals, useGroupInsights } from '../api/signals'
 
 function formatTime(value?: string | null) {
   if (!value) return '待安排'
@@ -33,6 +34,9 @@ export default function GroupDetail() {
   const { data: group, isLoading } = useGroup(gid)
   const { data: reports = [] } = useGroupReports(gid, 50)
   const { data: jobs = [] } = useSchedulerJobs()
+  const { data: signals = [] } = useGroupSignals(gid, true)
+  const { data: insights } = useGroupInsights(gid, 14)
+  const trends = insights?.trends ?? []
   const update = useUpdateGroup(gid)
   const createSrc = useCreateSource(gid)
   const deleteSrc = useDeleteSource(gid)
@@ -250,6 +254,42 @@ export default function GroupDetail() {
                       移除
                     </button>
                   </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="rail-block">
+            <div className="rail-head">
+              <div>
+                <span className="soft-label">SIGNALS</span>
+                <h2>新观点</h2>
+              </div>
+              {signals.length > 0 && <span className="reader-tag">🆕 {signals.length}</span>}
+            </div>
+            {trends.length > 0 && (
+              <div className="insight-card">
+                <div className="insight-card-head">
+                  🌐 行业趋势（{trends.length}）
+                </div>
+                {trends.slice(0, 4).map((t) => (
+                  <div key={t.trend} className="insight-card-row">
+                    <strong>{t.signal_count >= 3 ? '🔥 ' : ''}{t.trend}</strong>
+                    <span className="muted"> — {t.source_names.slice(0, 3).join('、')}</span>
+                    <span className="accent"> {t.momentum}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="brief-list">
+              {signals.length === 0 && trends.length === 0 && <div className="muted-line">还没有新观点信号。采集后系统会自动判定。</div>}
+              {signals.slice(0, 8).map((s) => (
+                <div className="brief-row brief-row-compact" key={s.id}>
+                  <div>
+                    <strong className="brief-row-sub" style={{ marginBottom: 4 }}>{s.summary || '（无摘要）'}</strong>
+                    <small className="brief-row-sub">{s.source_name || '博主'} · {formatTime(s.created_at)}</small>
+                  </div>
+                  <span className="reader-tag">{s.is_new ? '🆕' : '♻️'}</span>
                 </div>
               ))}
             </div>

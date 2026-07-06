@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.db.engine import get_session
-from app.db.repos import GroupRepo, SourceRepo, AnalyzedRepo, ReportRepo
+from app.db.repos import GroupRepo, SourceRepo, AnalyzedRepo, ReportRepo, SignalRepo
 from app.db.schema import Report
 from app.llm import OpenAICompatClient, LLMMessage
 from app.models.group import ReportKind
@@ -49,13 +49,30 @@ class KnowledgeService:
             new_items = self._collect_new_items(source)
             if not new_items:
                 continue
-            analysis = self._analyze_source(source, new_items)
+
+            # 三态分组：
+            #   signal_items  = 新观点（is_new=True）+ 未判定（采集时 LLM 失败，兜底深度分析）
+            #   repeat_items  = 确认过的老调重弹（has_signal=True 且 is_new=False），只汇总不深度分析
+            signal_items = [it for it in new_items if it.get("is_new_signal") or not it.get("has_signal", True)]
+            repeat_items = [it for it in new_items if it.get("has_signal") and not it.get("is_new_signal")]
+
+            if signal_items:
+                analysis = self._analyze_source(source, signal_items)
+            elif repeat_items:
+                # 没有新观点，只有老调重弹：生成一句简短说明，不喂大量原文给 LLM
+                analysis = self._summarize_repeats(source, repeat_items)
+            else:
+                continue
             if not analysis:
                 continue
+
+            new_signal_count = sum(1 for it in signal_items if it.get("is_new_signal"))
             analyzed_results.append({
                 "name": source.display_name,
                 "analysis": analysis,
                 "new_count": len(new_items),
+                "new_signal_count": new_signal_count,
+                "repeat_count": len(repeat_items),
                 "source_id": source.id,
             })
             # 标记已分析（只有 analysis 成功才标记）
@@ -64,13 +81,26 @@ class KnowledgeService:
                     source.id,
                     [it["content_id"] for it in new_items],
                 )
-            total_new += len(new_items)
+            total_new += new_signal_count
 
         if not analyzed_results:
             return {"creators": [], "report_id": None, "report_path": None}
 
+        # 跨博主趋势提炼（失败不阻塞报告生成）
+        insights = None
+        try:
+            from app.services.insight_service import InsightService
+            raw_days = config_service.effective_for_group(group_id).get("insight_lookback_days", 14)
+            try:
+                days = int(raw_days)
+            except (TypeError, ValueError):
+                days = 14
+            insights = InsightService().build_group_insights(group_id, days=days)
+        except Exception:
+            insights = None
+
         # 落地报告
-        report_md, report_json_path = self._write_report(group.slug, analyzed_results)
+        report_md, report_json_path = self._write_report(group.slug, analyzed_results, insights)
         with get_session() as s:
             report = ReportRepo(s).create(Report(
                 group_id=group_id,
@@ -112,9 +142,13 @@ class KnowledgeService:
     # ============ 内部 ============
 
     def _collect_new_items(self, source) -> list[dict]:
-        """从该源目录读已转录的 content，过滤掉已分析的"""
+        """从该源目录读已转录的 content，过滤掉已分析的，并附加观点信号"""
         with get_session() as s:
             analyzed = AnalyzedRepo(s).get_analyzed_ids(source.id)
+            # 查 Signal 表：哪些 content 带新观点
+            sig_map = {}
+            for sig in SignalRepo(s).list_by_source(source.id, limit=500):
+                sig_map[sig.content_id] = sig
         storage = StorageManager(source.directory)
         new_items: list[dict] = []
         for md in storage.list_metadata():
@@ -124,12 +158,19 @@ class KnowledgeService:
             transcript = storage.get_transcript(cid)
             if not transcript:
                 continue
+            sig = sig_map.get(cid)
             new_items.append({
                 "content_id": cid,
                 "title": md.get("title", ""),
                 "transcript": transcript,
                 "comments": storage.get_comments(cid) or [],
                 "create_time": md.get("create_time", ""),
+                # 观点信号（采集时由 SignalService 写入，可能为 None）
+                # 三态区分：has_signal=False 表示采集时判定失败（LLM 异常），不应当作老调重弹
+                "has_signal": sig is not None,
+                "is_new_signal": bool(sig and sig.is_new),
+                "signal_summary": sig.summary if sig else "",
+                "signal_new_points": list(sig.new_points) if sig else [],
             })
         return new_items
 
@@ -156,6 +197,30 @@ class KnowledgeService:
             )
         except Exception as e:
             return None
+
+    @staticmethod
+    def _summarize_repeats(source, items: list[dict]) -> str:
+        """老调重弹内容的简短汇总（不调 LLM，省 token）"""
+        titles = "、".join((it.get("title", "") or "无标题")[:15] for it in items[:5])
+        points = []
+        for it in items:
+            for p in (it.get("signal_new_points") or []):
+                if p not in points:
+                    points.append(p)
+            if len(points) >= 5:
+                break
+        lines = [
+            f"> 本期 {len(items)} 条内容**未带来新观点**，与作者此前观点重复。",
+            "",
+        ]
+        if points:
+            lines.append("**再次强调的观点**：")
+            for p in points:
+                lines.append(f"- {p}")
+            lines.append("")
+        if titles:
+            lines.append(f"涉及内容：{titles}{' 等' if len(items) > 5 else ''}")
+        return "\n".join(lines)
 
     @staticmethod
     def _build_transcripts_block(items: list[dict]) -> str:
@@ -207,20 +272,41 @@ class KnowledgeService:
             parts.append(header + "\n" + "\n".join(body))
         return "\n\n---\n\n".join(parts)
 
-    def _write_report(self, group_slug: str, results: list[dict]) -> tuple[Path, Path]:
+    def _write_report(self, group_slug: str, results: list[dict], insights: Optional[dict] = None) -> tuple[Path, Path]:
         dir_ = paths.knowledge_dir_for_group(group_slug)
         dir_.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         md_path = dir_ / f"knowledge_{ts}.md"
         json_path = dir_ / f"knowledge_{ts}.json"
 
+        total_new_signals = sum(r.get("new_signal_count", 0) for r in results)
+        total_repeats = sum(r.get("repeat_count", 0) for r in results)
+
         lines = [
             "# Cortex 知识报告",
             f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "",
+            f"**本期新信号**：{total_new_signals} 条新观点 · {total_repeats} 条内容与既有观点重复（已折叠）",
+            "",
         ]
+
+        # 跨博主行业信号段（有趋势时才出现，放最前）
+        trend_lines = self._format_insights(insights)
+        if trend_lines:
+            lines.extend(trend_lines)
+            lines.append("")
         for r in results:
-            lines.append(f"## {r['name']}（本次新增 {r['new_count']} 条）")
+            new_cnt = r.get("new_signal_count", 0)
+            rep_cnt = r.get("repeat_count", 0)
+            head = f"## {r['name']}"
+            if new_cnt:
+                head += f"（🆕 {new_cnt} 条新观点"
+                if rep_cnt:
+                    head += f" / ♻️ {rep_cnt} 条重复"
+                head += "）"
+            else:
+                head += f"（♻️ {rep_cnt} 条重复，无新增）"
+            lines.append(head)
             lines.append("")
             lines.append(r["analysis"])
             lines.append("")
@@ -230,13 +316,61 @@ class KnowledgeService:
 
         md_path.write_text("\n".join(lines), encoding="utf-8")
         json_path.write_text(
-            json.dumps({"creators": results}, ensure_ascii=False, indent=2),
+            json.dumps({
+                "creators": results,
+                "insights": insights,
+                "stats": {
+                    "new_signals": total_new_signals,
+                    "repeats": total_repeats,
+                },
+            }, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         return md_path, json_path
 
     @staticmethod
+    def _format_insights(insights: Optional[dict]) -> list[str]:
+        """把跨博主趋势提炼结果格式化成 markdown 段落"""
+        if not insights or not insights.get("trends"):
+            # 有信号但没形成趋势时，也显示一句说明（让用户知道系统做了分析）
+            if insights and insights.get("raw_signal_count", 0) >= 2:
+                days = insights.get("days", 14)
+                return [
+                    f"## 🌐 本期行业信号（近 {days} 天）",
+                    "",
+                    f"> 分析了 {insights.get('raw_signal_count', 0)} 条新信号，"
+                    "各博主观点较分散，未形成明显共同趋势。",
+                    "",
+                    "---",
+                ]
+            return []
+        trends = insights["trends"]
+        days = insights.get("days", 14)
+        raw_count = insights.get("raw_signal_count", 0)
+        lines = [
+            f"## 🌐 本期行业信号（近 {days} 天 · {raw_count} 条新信号）",
+            "",
+            "*多个博主同时在讲的观点，往往是正在形成的行业信号。*",
+            "",
+        ]
+        for t in trends:
+            momentum = t.get("momentum", "→ 稳定")
+            sources = t.get("source_names", [])
+            cnt = t.get("signal_count", len(sources))
+            is_hot = cnt >= 3 or "升温" in momentum
+            icon = "🔥" if is_hot else "•"
+            sources_str = "、".join(sources[:4]) + (" 等" if len(sources) > 4 else "")
+            lines.append(f"- {icon} **「{t.get('trend', '')}」** — {sources_str} 都在讲（{cnt} 信号，{momentum}）")
+            if t.get("why_hot"):
+                lines.append(f"  - {t['why_hot']}")
+        lines.extend(["", "---", ""])
+        return lines
+
+    @staticmethod
     def _make_summary(results: list[dict]) -> str:
         names = "、".join(r["name"] for r in results[:5])
-        total = sum(r["new_count"] for r in results)
-        return f"本期分析了 {len(results)} 个源（{names}），共 {total} 条新内容"
+        total_new = sum(r.get("new_signal_count", 0) for r in results)
+        total_all = sum(r["new_count"] for r in results)
+        if total_new > 0:
+            return f"本期 {len(results)} 个源（{names}）：🆕 {total_new} 条新观点，共 {total_all} 条内容"
+        return f"本期 {len(results)} 个源（{names}）：{total_all} 条内容均与既有观点重复，无新增"

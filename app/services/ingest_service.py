@@ -159,6 +159,24 @@ class IngestService:
                     "file_size": file_size,
                     "transcribed": transcript is not None,
                 })
+
+                # 观点判定（有 transcript 才判，失败不阻塞采集）
+                if transcript:
+                    try:
+                        from app.services.signal_service import SignalService
+                        comments_for_signal = storage.get_comments(c.content_id) or []
+                        sig = SignalService().evaluate(
+                            source, c.content_id, transcript,
+                            comments=comments_for_signal, create_time=c.create_time,
+                        )
+                        if sig:
+                            if sig.get("is_new"):
+                                self._log(log_cb, f"  🆕 新观点: {sig.get('summary','')[:40]}")
+                            else:
+                                self._log(log_cb, f"  ♻️ 老调重弹（{len(sig.get('matched_points',[]))} 点命中档案）")
+                    except Exception as e:
+                        self._log(log_cb, f"  [warn] 观点判定失败: {e}")
+
                 new_count += 1
                 self._log(log_cb, f"  ✓ {c.title[:40]}{' [+' + str(len(transcript)) + '字]' if transcript else ''}")
             except Exception as e:

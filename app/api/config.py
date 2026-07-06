@@ -30,6 +30,9 @@ CONFIG_SCHEMA = {
     "llm_max_tokens": {"type": "int", "label": "Max Tokens", "min": 256, "max": 32768},
     "research_timeout_sec": {"type": "int", "label": "研究超时（秒）", "min": 60, "max": 7200},
     "research_search_limit": {"type": "int", "label": "研究搜索数", "min": 1, "max": 50},
+    "signal_min_new_points": {"type": "int", "label": "新信号最少新观点数", "min": 1, "max": 10},
+    "insight_lookback_days": {"type": "int", "label": "趋势回看天数", "min": 1, "max": 90},
+    "insight_min_sources": {"type": "int", "label": "趋势最少博主数", "min": 2, "max": 20},
 }
 
 
@@ -44,7 +47,13 @@ def get_config():
 @router.patch("")
 def update_config(req: ConfigUpdateReq):
     # 过滤：只能改 schema 里有的字段 + prompt 模板
-    allowed = set(CONFIG_SCHEMA.keys()) | {"analysis_prompt_template", "research_prompt_template"}
+    allowed = set(CONFIG_SCHEMA.keys()) | {
+        "analysis_prompt_template",
+        "research_prompt_template",
+        "signal_judge_prompt_template",
+        "profile_update_prompt_template",
+        "insight_prompt_template",
+    }
     filtered = {k: v for k, v in req.values.items() if k in allowed}
     # secret 脱敏 **** 表示未改，跳过
     for k, v in list(filtered.items()):
@@ -74,12 +83,21 @@ def list_prompts():
     return {
         "analysis_prompt_template": config_service.prompt("analysis_prompt_template"),
         "research_prompt_template": config_service.prompt("research_prompt_template"),
+        "signal_judge_prompt_template": config_service.prompt("signal_judge_prompt_template"),
+        "profile_update_prompt_template": config_service.prompt("profile_update_prompt_template"),
+        "insight_prompt_template": config_service.prompt("insight_prompt_template"),
     }
 
 
 @router.patch("/prompts/{name}")
 def update_prompt(name: str, req: PromptUpdateReq):
-    if name not in ("analysis_prompt_template", "research_prompt_template"):
+    if name not in (
+        "analysis_prompt_template",
+        "research_prompt_template",
+        "signal_judge_prompt_template",
+        "profile_update_prompt_template",
+        "insight_prompt_template",
+    ):
         raise HTTPException(400, "unknown prompt name")
     config_service.set_prompt(name, req.content)
     return {"ok": True, "content": req.content}
