@@ -30,6 +30,9 @@ export default function CreatorDetail() {
   const contents = contentsResp?.items ?? []
   const newCount = contents.filter((c) => c.is_new_signal === true).length
   const repeatCount = contents.filter((c) => c.is_new_signal === false).length
+  // profile 可能是 string（已建立）或空字符串（未建立）；防御非 string 类型
+  const profileText = typeof profile === 'string' ? profile : ''
+  const hasProfile = profileText && !profileText.includes('尚未建立') && !profileText.includes('尚未关联')
 
   return (
     <>
@@ -61,7 +64,7 @@ export default function CreatorDetail() {
       </section>
 
       {/* 观点档案 */}
-      {profile && !profile.includes('尚未建立') && !profile.includes('尚未关联') && (
+      {hasProfile && (
         <section className="reader-block">
           <div className="reader-block-head">
             <div>
@@ -74,7 +77,7 @@ export default function CreatorDetail() {
           </div>
           {showProfile && (
             <div className="card prose-cortex" style={{ marginTop: 12 }}>
-              <ReactMarkdown>{profile}</ReactMarkdown>
+              <ReactMarkdown>{profileText}</ReactMarkdown>
             </div>
           )}
         </section>

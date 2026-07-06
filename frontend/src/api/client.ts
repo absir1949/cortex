@@ -17,6 +17,17 @@ async function request<T>(method: string, path: string, body?: any): Promise<T> 
     body: body ? JSON.stringify(body) : undefined,
   })
   if (res.status === 204) return undefined as any
+
+  // 按 content-type 分流：text/plain 返回原文，JSON 才解析
+  const contentType = res.headers.get('content-type') || ''
+  if (contentType.includes('text/plain')) {
+    const text = await res.text()
+    if (!res.ok) {
+      throw new ApiError(res.status, text, text)
+    }
+    return text as any
+  }
+
   const json = await res.json().catch(() => ({}))
   if (!res.ok) {
     throw new ApiError(res.status, json?.detail || res.statusText, json)
