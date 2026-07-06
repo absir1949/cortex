@@ -14,6 +14,7 @@ import {
 import { useGroupReports } from '../api/reports'
 import { useSchedulerJobs } from '../api/scheduler'
 import { useGroupSignals, useGroupInsights } from '../api/signals'
+import { useTask } from '../api/tasks'
 
 function formatTime(value?: string | null) {
   if (!value) return '待安排'
@@ -52,6 +53,8 @@ export default function GroupDetail() {
   const [showAdd, setShowAdd] = useState(false)
   const [notice, setNotice] = useState('')
   const [showRepeats, setShowRepeats] = useState(false)
+  const [analyzeTaskId, setAnalyzeTaskId] = useState<string | null>(null)
+  const analyzeTask = useTask(analyzeTaskId)
   const [sourceForm, setSourceForm] = useState({
     type: 'creator' as 'creator' | 'keyword',
     identifier: '',
@@ -73,6 +76,27 @@ export default function GroupDetail() {
       comment_top_n: Number(group.defaults?.comment_top_n || 20),
     })
   }, [group])
+
+  // 切换 group 时重置本地状态（避免 showRepeats/notice 残留）
+  useEffect(() => {
+    setShowRepeats(false)
+    setNotice('')
+  }, [gid])
+
+  // 监听 analyze 任务完成
+  useEffect(() => {
+    if (!analyzeTaskId || !analyzeTask.data) return
+    const st = analyzeTask.data.status
+    if (st === 'succeeded') {
+      const rid = analyzeTask.data.result?.report_id
+      setNotice(rid ? `✓ 报告已生成。` : '没有可整理的新内容（所有内容已分析过）。')
+      setAnalyzeTaskId(null)
+      qc.invalidateQueries({ queryKey: ['reports', 'group', gid] })
+    } else if (st === 'failed' || st === 'canceled') {
+      setNotice('整理失败：' + ((analyzeTask.data.error || '').slice(0, 80) || '未知错误'))
+      setAnalyzeTaskId(null)
+    }
+  }, [analyzeTask.data, analyzeTaskId, gid, qc])
 
   const latestReport = useMemo(() => reports[0], [reports])
   const scheduledReports = useMemo(() => reports.filter((r) => r.kind === 'scheduled'), [reports])
@@ -111,9 +135,9 @@ export default function GroupDetail() {
   }
 
   const onAnalyze = async () => {
-    await analyzeGroup.mutateAsync()
-    setNotice('正在基于已有信号整理报告，不重新采集，很快就好。')
-    qc.invalidateQueries({ queryKey: ['reports', 'group', gid] })
+    const res = await analyzeGroup.mutateAsync()
+    setAnalyzeTaskId(res.task_id)
+    setNotice('正在整理报告，通常需要几分钟，完成后会自动显示在上方。')
   }
 
   // 信号分流：新观点 vs 老调重弹

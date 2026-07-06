@@ -175,7 +175,7 @@ class KnowledgeService:
         return new_items
 
     def _analyze_source(self, source, items: list[dict]) -> Optional[str]:
-        """构造 prompt 喂 LLM。内容过多时分批，合并结果。"""
+        """构造 prompt 喂 LLM。内容过多时分批分析，再 reduce 合并成一份连贯整理。"""
         BATCH = 8  # 每批最多分析 8 条，避免单次 LLM 调用输入过长超时
         if not items:
             return None
@@ -184,7 +184,7 @@ class KnowledgeService:
         if len(items) <= BATCH:
             return self._analyze_one_batch(source, items)
 
-        # 分批分析，合并
+        # 分批分析
         parts: list[str] = []
         for i in range(0, len(items), BATCH):
             batch = items[i:i + BATCH]
@@ -193,7 +193,33 @@ class KnowledgeService:
                 parts.append(r)
         if not parts:
             return None
-        return "\n\n---\n\n".join(parts)
+        # 只有一批成功，直接返回
+        if len(parts) == 1:
+            return parts[0]
+        # 多批 → reduce 合并成一份连贯整理
+        return self._merge_batches(source, parts) or "\n\n---\n\n".join(parts)
+
+    def _merge_batches(self, source, parts: list[str]) -> Optional[str]:
+        """把多份分批整理合并成一份连贯总结"""
+        parts_block = "\n\n---\n\n".join(
+            f"【整理 {i}】\n{p}" for i, p in enumerate(parts, 1)
+        )
+        template = config_service.prompt("analysis_merge_prompt_template")
+        prompt = template.format(
+            creator_name=source.display_name,
+            batch_count=len(parts),
+            parts_block=parts_block[:16000],  # 防止超长
+        )
+        try:
+            return self.llm.chat(
+                [
+                    LLMMessage(role="system", content="你是电商行业的知识整理专家。把多份分批整理合并成一份连贯的总结，去重并按话题重组。"),
+                    LLMMessage(role="user", content=prompt),
+                ],
+                config=config_service.get_llm_config(),
+            )
+        except Exception:
+            return None
 
     def _analyze_one_batch(self, source, items: list[dict]) -> Optional[str]:
         """分析单批内容"""

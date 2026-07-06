@@ -124,7 +124,7 @@ export default function Dashboard() {
                   <div className="signal-meta">
                     <span>{t.source_names.join('、')} 都在讲</span>
                     <span>·</span>
-                    <span className="accent" style={{ color: '#149b68' }}>{t.momentum}</span>
+                    <span className="accent">{t.momentum}</span>
                     <span>·</span>
                     <span>{t.signal_count} 信号</span>
                   </div>

@@ -358,10 +358,17 @@ button:disabled {
 
 /* ===== 信号面板（时间流 + 视觉分层）===== */
 
+/* 信号流容器 */
+.signal-feed {
+  margin-top: 0.5rem;
+}
+
 /* 单条信号卡片 */
 .signal-item {
   @apply py-4;
   border-bottom: 1px solid var(--border, #dce6dd);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .signal-item:last-child {
   border-bottom: none;
@@ -436,6 +443,10 @@ button:disabled {
 }
 .signal-meta a:hover {
   text-decoration: underline;
+}
+.signal-meta .accent {
+  color: #149b68;
+  font-weight: 500;
 }
 /* 折叠的老调重弹 */
 .repeat-fold {
