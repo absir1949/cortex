@@ -55,8 +55,19 @@ class SourceService:
                 name_part = slugify(resolved_name or resolved_identifier[:8])
                 directory = f"{group.slug}/{type_value}-{name_part}"
 
+            # creator 类型：先建/关联全局博主身份，再带 creator_id 建 source（原子化）
+            creator_id = None
+            if type_value == SourceType.CREATOR.value:
+                creator = CreatorRepo(s).get_or_create(
+                    platform=platform,
+                    platform_uid=resolved_identifier,
+                    display_name=resolved_name or resolved_identifier,
+                )
+                creator_id = creator.id
+
             src = Source(
                 group_id=group_id,
+                creator_id=creator_id,
                 type=type_value,
                 platform=platform,
                 identifier=resolved_identifier,
@@ -68,17 +79,7 @@ class SourceService:
                 comment_top_n=comment_top_n,
                 directory=directory,
             )
-            src = SourceRepo(s).create(src)
-            # creator 类型：关联到全局博主身份（跨平台聚合 + 跨组去重）
-            if type_value == SourceType.CREATOR.value:
-                creator = CreatorRepo(s).get_or_create(
-                    platform=platform,
-                    platform_uid=resolved_identifier,
-                    display_name=resolved_name or resolved_identifier,
-                )
-                src.creator_id = creator.id
-                SourceRepo(s).update(src)
-            return src
+            return SourceRepo(s).create(src)
 
     @staticmethod
     def _resolve_douyin_creator(identifier: str, display_name: str = "") -> tuple[str, str]:

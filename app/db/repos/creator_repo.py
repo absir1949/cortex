@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Optional
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.db.schema import Creator, CreatorAlias, Source
@@ -59,13 +60,16 @@ class CreatorRepo:
             return existing
 
         # 新建：slug 用 display_name，重复时加后缀
-        name = display_name or f"creator-{platform_uid[:8]}"
+        name = (display_name or "").strip() or f"creator-{platform_uid[:8]}"
         base_slug = slugify(name)
         slug = base_slug
         i = 2
         while self.session.exec(select(Creator).where(Creator.slug == slug)).first():
             slug = f"{base_slug}-{i}"
             i += 1
+            if i > 1000:  # 安全阀，防极端死循环
+                slug = f"{base_slug}-{platform_uid[:8]}"
+                break
         creator = Creator(name=name, slug=slug)
         self.session.add(creator)
         self.session.flush()
@@ -73,9 +77,17 @@ class CreatorRepo:
             creator_id=creator.id,
             platform=platform,
             platform_uid=platform_uid,
-            display_name=display_name,
+            display_name=(display_name or "").strip(),
         ))
-        self.session.commit()
+        try:
+            self.session.commit()
+        except IntegrityError:
+            # 并发创建同一博主：另一个请求已先建好，回滚后回查
+            self.session.rollback()
+            again = self.find_by_platform_uid(platform, platform_uid)
+            if again:
+                return again
+            raise
         self.session.refresh(creator)
         return creator
 

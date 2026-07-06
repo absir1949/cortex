@@ -56,15 +56,28 @@ def list_source_contents(
         src = SourceRepo(s).get(source_id)
         if not src or src.group_id != group_id:
             raise HTTPException(404, "source not found")
-        # 该 source 的信号 map
-        sig_map = {}
-        for sig in SignalRepo(s).list_by_source(source_id, limit=500):
-            sig_map[sig.content_id] = sig
 
     storage = StorageManager(src.directory)
     mds = storage.list_metadata()  # 已按 create_time 倒序
+    page_mds = mds[offset:offset + limit]
+    # 按本页 content_id 精确查信号（避免全量拉取 + 500 上限漏标）
+    page_cids = [md.get("content_id") or md.get("video_id") for md in page_mds]
+    page_cids = [c for c in page_cids if c]
+    sig_map: dict[str, object] = {}
+    if page_cids:
+        with get_session() as s:
+            from sqlmodel import select
+            from app.db.schema import Signal
+            rows = s.exec(
+                select(Signal).where(
+                    Signal.source_id == source_id,
+                    Signal.content_id.in_(page_cids),
+                )
+            ).all()
+            sig_map = {r.content_id: r for r in rows}
+
     out = []
-    for md in mds[offset:offset + limit]:
+    for md in page_mds:
         cid = md.get("content_id") or md.get("video_id")
         if not cid:
             continue

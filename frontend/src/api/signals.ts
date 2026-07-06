@@ -24,14 +24,6 @@ export const useGroupSignals = (groupId: number, isNew?: boolean) =>
     enabled: !!groupId,
   })
 
-export const useSourceProfile = (groupId: number | null | undefined, sourceId: number | null | undefined) =>
-  useQuery({
-    queryKey: ['profile', groupId, sourceId],
-    queryFn: () =>
-      api.get<string>(`/groups/${groupId}/profile/${sourceId}`),
-    enabled: !!groupId && !!sourceId,
-  })
-
 export interface Trend {
   trend: string
   source_names: string[]

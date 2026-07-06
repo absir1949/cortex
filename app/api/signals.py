@@ -1,12 +1,10 @@
 from __future__ import annotations
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import PlainTextResponse
 
 from app.db.engine import get_session
 from app.db.repos import SignalRepo, GroupRepo, SourceRepo
 from app.services import config_service
-from app.storage import paths
 from app.storage.fs import StorageManager
 
 
@@ -112,20 +110,3 @@ def get_group_insights(group_id: int, days: Optional[int] = Query(None, ge=1, le
     from app.services.insight_service import InsightService
     return InsightService().build_group_insights(group_id, days=days)
 
-
-@router.get("/groups/{group_id}/profile/{source_id}", response_class=PlainTextResponse)
-def get_source_profile(group_id: int, source_id: int):
-    """读博主的观点档案（markdown 原文）。档案按 creator 全局存储。"""
-    with get_session() as s:
-        group = GroupRepo(s).get(group_id)
-        src = SourceRepo(s).get(source_id)
-    if not group:
-        raise HTTPException(404, "group not found")
-    if not src or src.group_id != group_id:
-        raise HTTPException(404, "source not found in this group")
-    if not src.creator_id:
-        return f"# {src.display_name} 的观点档案\n\n（尚未关联博主身份，采集后会自动建立）"
-    path = paths.profile_path(src.creator_id)
-    if not path.exists():
-        return f"# {src.display_name} 的观点档案\n\n（尚未建立档案，采集后会自动生成）"
-    return path.read_text(encoding="utf-8")

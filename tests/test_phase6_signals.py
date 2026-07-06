@@ -363,8 +363,8 @@ def test_signals_api_endpoints():
     assert r.json()["new_signal_count"] == 1
     assert r.json()["repeat_count"] == 1
 
-    # /api/groups/{id}/profile/{source_id}（档案不存在时返回提示）
-    r = client.get(f"/api/groups/{grp}/profile/{src}")
+    # /api/groups/{id}/sources/{source_id}/profile（档案不存在时返回提示）
+    r = client.get(f"/api/groups/{grp}/sources/{src}/profile")
     assert r.status_code == 200
     assert "尚未建立档案" in r.text or "观点档案" in r.text
 
