@@ -7,6 +7,7 @@ from app.db.engine import get_session
 from app.db.repos import SignalRepo, GroupRepo, SourceRepo
 from app.services import config_service
 from app.storage import paths
+from app.storage.fs import StorageManager
 
 
 router = APIRouter(prefix="/api", tags=["signals"])
@@ -26,6 +27,31 @@ def _to_brief(sig) -> dict:
     }
 
 
+def _enrich_with_content(signals: list, sources: dict) -> list:
+    """给信号列表附加 source_name/platform/url/title（从 metadata 读，按 source 批量）"""
+    # 按 source_id 收集 content_id，批量读 metadata，避免逐条读盘
+    storage_cache: dict[int, StorageManager] = {}
+    out = []
+    for sig in signals:
+        d = _to_brief(sig)
+        src = sources.get(sig.source_id)
+        d["source_name"] = src.display_name if src else ""
+        d["platform"] = src.platform if src else ""
+        # 读 url/title
+        url, title = "", ""
+        if src:
+            if src.id not in storage_cache:
+                storage_cache[src.id] = StorageManager(src.directory)
+            md = storage_cache[src.id].get_metadata(sig.content_id)
+            if md:
+                url = md.get("url", "")
+                title = md.get("title", "")
+        d["url"] = url
+        d["title"] = title
+        out.append(d)
+    return out
+
+
 @router.get("/signals/recent")
 def list_recent_signals(
     is_new: Optional[bool] = Query(None),
@@ -33,18 +59,10 @@ def list_recent_signals(
 ):
     """最近的观点信号（首页新信号展示用）"""
     with get_session() as s:
-        # 附带 source 名字，前端展示博主名
         signals = SignalRepo(s).list_recent(is_new=is_new, limit=limit)
         source_ids = {sig.source_id for sig in signals}
         sources = {src.id: src for src in (SourceRepo(s).get(sid) for sid in source_ids) if src}
-    out = []
-    for sig in signals:
-        d = _to_brief(sig)
-        src = sources.get(sig.source_id)
-        d["source_name"] = src.display_name if src else ""
-        d["platform"] = src.platform if src else ""
-        out.append(d)
-    return out
+    return _enrich_with_content(signals, sources)
 
 
 @router.get("/groups/{group_id}/signals")
@@ -59,14 +77,7 @@ def list_group_signals(
             raise HTTPException(404, "group not found")
         signals = SignalRepo(s).list_by_group(group_id, is_new=is_new, limit=limit)
         sources = {src.id: src for src in SourceRepo(s).list_by_group(group_id)}
-    out = []
-    for sig in signals:
-        d = _to_brief(sig)
-        src = sources.get(sig.source_id)
-        d["source_name"] = src.display_name if src else ""
-        d["platform"] = src.platform if src else ""
-        out.append(d)
-    return out
+    return _enrich_with_content(signals, sources)
 
 
 @router.get("/groups/{group_id}/signals/stats")

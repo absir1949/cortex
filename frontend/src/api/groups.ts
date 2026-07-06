@@ -83,3 +83,9 @@ export const useRunGroup = (groupId: number) =>
       return api.post<{ task_id: string }>(`/groups/${groupId}/run?${qs.toString()}`)
     },
   })
+
+export const useAnalyzeGroup = (groupId: number) =>
+  useMutation({
+    mutationFn: () =>
+      api.post<{ task_id: string }>(`/groups/${groupId}/analyze`),
+  })

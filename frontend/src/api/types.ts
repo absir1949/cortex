@@ -103,4 +103,6 @@ export interface Signal {
   created_at: string
   source_name?: string
   platform?: string
+  url?: string
+  title?: string
 }

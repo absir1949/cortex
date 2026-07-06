@@ -15,6 +15,7 @@ class TaskKind(str, Enum):
     INGEST = "ingest"                        # 定时订阅采集
     RESEARCH = "research"                    # 按需研究
     TRANSCRIBE_BACKFILL = "transcribe_backfill"
+    ANALYZE = "analyze"                      # 仅生成报告（基于已采集的信号，不重新采集）
 
 
 class TaskStatus(str, Enum):

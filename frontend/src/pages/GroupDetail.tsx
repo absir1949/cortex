@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   useGroup,
   useUpdateGroup,
@@ -7,6 +8,7 @@ import {
   useDeleteSource,
   useRunSource,
   useRunGroup,
+  useAnalyzeGroup,
   useDeleteGroup,
 } from '../api/groups'
 import { useGroupReports } from '../api/reports'
@@ -34,7 +36,7 @@ export default function GroupDetail() {
   const { data: group, isLoading } = useGroup(gid)
   const { data: reports = [] } = useGroupReports(gid, 50)
   const { data: jobs = [] } = useSchedulerJobs()
-  const { data: signals = [] } = useGroupSignals(gid, true)
+  const { data: allSignals = [] } = useGroupSignals(gid)
   const { data: insights } = useGroupInsights(gid, 14)
   const trends = insights?.trends ?? []
   const update = useUpdateGroup(gid)
@@ -42,11 +44,14 @@ export default function GroupDetail() {
   const deleteSrc = useDeleteSource(gid)
   const runSrc = useRunSource(gid)
   const runGroup = useRunGroup(gid)
+  const analyzeGroup = useAnalyzeGroup(gid)
+  const qc = useQueryClient()
   const deleteGroup = useDeleteGroup()
   const navigate = useNavigate()
 
   const [showAdd, setShowAdd] = useState(false)
   const [notice, setNotice] = useState('')
+  const [showRepeats, setShowRepeats] = useState(false)
   const [sourceForm, setSourceForm] = useState({
     type: 'creator' as 'creator' | 'keyword',
     identifier: '',
@@ -105,6 +110,16 @@ export default function GroupDetail() {
     setNotice('已经开始刷新专题，完成后会生成新的日报。')
   }
 
+  const onAnalyze = async () => {
+    await analyzeGroup.mutateAsync()
+    setNotice('正在基于已有信号整理报告，不重新采集，很快就好。')
+    qc.invalidateQueries({ queryKey: ['reports', 'group', gid] })
+  }
+
+  // 信号分流：新观点 vs 老调重弹
+  const newSignals = allSignals.filter((s) => s.is_new)
+  const repeatSignals = allSignals.filter((s) => !s.is_new)
+
   const onSaveSettings = async () => {
     await update.mutateAsync({
       defaults: {
@@ -142,6 +157,9 @@ export default function GroupDetail() {
           <button className="pill-button primary" onClick={onRunGroup} disabled={runGroup.isPending}>
             {runGroup.isPending ? '刷新中' : '刷新今日简报'}
           </button>
+          <button className="pill-button" onClick={onAnalyze} disabled={analyzeGroup.isPending} title="不重新采集，只基于已有信号整理报告">
+            {analyzeGroup.isPending ? '整理中' : '只整理报告'}
+          </button>
           <Link to={`/groups/${gid}/research`} className="pill-button">追问这个专题</Link>
           <button className="pill-button quiet" onClick={onToggleEnabled}>
             {group.enabled ? '暂停更新' : '恢复更新'}
@@ -173,6 +191,75 @@ export default function GroupDetail() {
                 还没有简报。点“刷新今日简报”，系统会从你关注的人里整理一份报告。
               </div>
             )}
+          </section>
+
+          {/* 信号流：时间倒序，视觉分层（趋势置顶 > 新观点展开 > 老调重弹折叠）*/}
+          <section className="reader-block">
+            <div className="reader-block-head">
+              <div>
+                <span className="soft-label">SIGNALS</span>
+                <h2>最近的信号</h2>
+              </div>
+              {newSignals.length > 0 && <span className="reader-tag">🆕 {newSignals.length}</span>}
+            </div>
+
+            {allSignals.length === 0 && (
+              <div className="muted-line">还没有信号。采集后系统会自动判定每条内容是「新观点」还是「老调重弹」。</div>
+            )}
+
+            <div className="signal-feed">
+              {newSignals.map((s) => (
+                <article className="signal-item" key={s.id}>
+                  <div className="signal-item-head">
+                    <span className="signal-item-badge">🆕</span>
+                    <span className="signal-item-summary">{s.summary || '（无摘要）'}</span>
+                  </div>
+                  {s.new_points.length > 0 && (
+                    <ul className="signal-points">
+                      {s.new_points.map((p, i) => <li key={i}>{p}</li>)}
+                    </ul>
+                  )}
+                  <div className="signal-meta">
+                    <span>{s.source_name || '博主'}</span>
+                    <span>·</span>
+                    <span>{formatTime(s.created_at)}</span>
+                    {s.url && (
+                      <>
+                        <span>·</span>
+                        <a href={s.url} target="_blank" rel="noreferrer">看原视频 ↗</a>
+                      </>
+                    )}
+                  </div>
+                </article>
+              ))}
+
+              {repeatSignals.length > 0 && (
+                showRepeats ? (
+                  repeatSignals.map((s) => (
+                    <article className="signal-item is-repeat" key={s.id}>
+                      <div className="signal-item-head">
+                        <span className="signal-item-badge">♻️</span>
+                        <span className="signal-item-summary">{s.summary || '（无摘要）'}</span>
+                      </div>
+                      {s.matched_points.length > 0 && (
+                        <ul className="signal-points">
+                          {s.matched_points.map((p, i) => <li key={i}>命中已有观点：{p}</li>)}
+                        </ul>
+                      )}
+                      <div className="signal-meta">
+                        <span>{s.source_name || '博主'}</span>
+                        <span>·</span>
+                        <span>{formatTime(s.created_at)}</span>
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <div className="repeat-fold" onClick={() => setShowRepeats(true)}>
+                    ♻️ {repeatSignals.length} 条与既有观点重复（点击展开）
+                  </div>
+                )
+              )}
+            </div>
           </section>
 
           <section className="reader-block">
@@ -259,20 +346,17 @@ export default function GroupDetail() {
             </div>
           </section>
 
-          <section className="rail-block">
-            <div className="rail-head">
-              <div>
-                <span className="soft-label">SIGNALS</span>
-                <h2>新观点</h2>
-              </div>
-              {signals.length > 0 && <span className="reader-tag">🆕 {signals.length}</span>}
-            </div>
-            {trends.length > 0 && (
-              <div className="insight-card">
-                <div className="insight-card-head">
-                  🌐 行业趋势（{trends.length}）
+          {trends.length > 0 && (
+            <section className="rail-block">
+              <div className="rail-head">
+                <div>
+                  <span className="soft-label">TRENDS</span>
+                  <h2>行业趋势</h2>
                 </div>
-                {trends.slice(0, 4).map((t) => (
+                <span className="reader-tag">{trends.length}</span>
+              </div>
+              <div className="insight-card" style={{ marginBottom: 0 }}>
+                {trends.map((t) => (
                   <div key={t.trend} className="insight-card-row">
                     <strong>{t.signal_count >= 3 ? '🔥 ' : ''}{t.trend}</strong>
                     <span className="muted"> — {t.source_names.slice(0, 3).join('、')}</span>
@@ -280,20 +364,8 @@ export default function GroupDetail() {
                   </div>
                 ))}
               </div>
-            )}
-            <div className="brief-list">
-              {signals.length === 0 && trends.length === 0 && <div className="muted-line">还没有新观点信号。采集后系统会自动判定。</div>}
-              {signals.slice(0, 8).map((s) => (
-                <div className="brief-row brief-row-compact" key={s.id}>
-                  <div>
-                    <strong className="brief-row-sub" style={{ marginBottom: 4 }}>{s.summary || '（无摘要）'}</strong>
-                    <small className="brief-row-sub">{s.source_name || '博主'} · {formatTime(s.created_at)}</small>
-                  </div>
-                  <span className="reader-tag">{s.is_new ? '🆕' : '♻️'}</span>
-                </div>
-              ))}
-            </div>
-          </section>
+            </section>
+          )}
 
           <section className="rail-block rhythm-block">
             <div>

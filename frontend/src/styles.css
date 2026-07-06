@@ -356,6 +356,98 @@ button:disabled {
   color: #149b68;
 }
 
+/* ===== 信号面板（时间流 + 视觉分层）===== */
+
+/* 单条信号卡片 */
+.signal-item {
+  @apply py-4;
+  border-bottom: 1px solid var(--border, #dce6dd);
+}
+.signal-item:last-child {
+  border-bottom: none;
+}
+/* 趋势信号：顶部高亮条 */
+.signal-item.is-trend {
+  position: relative;
+  padding-left: 0.875rem;
+}
+.signal-item.is-trend::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 3px;
+  border-radius: 2px;
+  background: #149b68;
+}
+/* 老调重弹：弱化 */
+.signal-item.is-repeat {
+  opacity: 0.62;
+}
+
+.signal-item-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.signal-item-badge {
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+.signal-item-summary {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+}
+/* 展开的要点列表 */
+.signal-points {
+  margin: 0.5rem 0 0.375rem 0;
+  padding-left: 0;
+  list-style: none;
+}
+.signal-points li {
+  font-size: 0.875rem;
+  color: #17221d;
+  line-height: 1.5;
+  padding: 0.125rem 0 0.125rem 0.875rem;
+  position: relative;
+}
+.signal-points li::before {
+  content: '·';
+  position: absolute;
+  left: 0;
+  color: #149b68;
+  font-weight: 700;
+}
+/* 元信息行（博主 · 时间 · 看原视频）*/
+.signal-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  color: #66756d;
+  flex-wrap: wrap;
+}
+.signal-meta a {
+  color: #149b68;
+  text-decoration: none;
+}
+.signal-meta a:hover {
+  text-decoration: underline;
+}
+/* 折叠的老调重弹 */
+.repeat-fold {
+  @apply py-3 cursor-pointer transition-colors;
+  font-size: 0.8125rem;
+  color: #66756d;
+  border-bottom: 1px solid var(--border, #dce6dd);
+}
+.repeat-fold:hover {
+  color: #149b68;
+}
+
 .tiny-note,
 .muted-line {
   @apply text-sm text-muted;

@@ -34,7 +34,7 @@ from app.api import reports as reports_api
 from app.api import config as config_api
 from app.api import signals as signals_api
 from app.tasks import get_runner
-from app.tasks.handlers import ingest_handler, research_handler  # noqa: F401 注册 handlers
+from app.tasks.handlers import ingest_handler, research_handler, analyze_handler  # noqa: F401 注册 handlers
 from app.scheduler import get_scheduler
 
 

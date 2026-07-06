@@ -114,34 +114,49 @@ export default function Dashboard() {
             <div className="group-label">🌐 跨博主趋势（基于「{groups.find((g) => g.id === selectedGroupId)?.name || '当前专题'}」近 14 天）</div>
           )}
           {trends.length > 0 && (
-            <div className="brief-list">
+            <div className="signal-feed">
               {trends.map((t) => (
-                <div className="brief-row" key={`trend-${t.trend}`}>
-                  <span>{t.signal_count >= 3 || /升温/.test(t.momentum) ? '🔥' : '📈'}</span>
-                  <div>
-                    <strong>{t.trend}</strong>
-                    {t.source_names.length > 0 && (
-                      <small className="brief-row-sub">
-                        {t.source_names.join('、')} 都在讲 · {t.momentum}
-                      </small>
-                    )}
+                <article className="signal-item is-trend" key={t.trend}>
+                  <div className="signal-item-head">
+                    <span className="signal-item-badge">{t.signal_count >= 3 || /升温/.test(t.momentum) ? '🔥' : '📈'}</span>
+                    <span className="signal-item-summary">{t.trend}</span>
                   </div>
-                  <small>{t.signal_count} 信号</small>
-                </div>
+                  <div className="signal-meta">
+                    <span>{t.source_names.join('、')} 都在讲</span>
+                    <span>·</span>
+                    <span className="accent" style={{ color: '#149b68' }}>{t.momentum}</span>
+                    <span>·</span>
+                    <span>{t.signal_count} 信号</span>
+                  </div>
+                </article>
               ))}
             </div>
           )}
-          {newSignals.length > 0 && trends.length > 0 && (
-            <div className="group-label">单博主新观点（全部专题）</div>
-          )}
           {newSignals.length > 0 && (
-            <div className="brief-list">
+            <div className="signal-feed">
               {newSignals.map((s) => (
-                <div className="brief-row" key={s.id}>
-                  <span>{s.source_name || '博主'}</span>
-                  <strong>{s.summary || '（无摘要）'}</strong>
-                  <small>{formatTime(s.created_at)}</small>
-                </div>
+                <article className="signal-item" key={s.id}>
+                  <div className="signal-item-head">
+                    <span className="signal-item-badge">🆕</span>
+                    <span className="signal-item-summary">{s.summary || '（无摘要）'}</span>
+                  </div>
+                  {s.new_points && s.new_points.length > 0 && (
+                    <ul className="signal-points">
+                      {s.new_points.map((p, i) => <li key={i}>{p}</li>)}
+                    </ul>
+                  )}
+                  <div className="signal-meta">
+                    <span>{s.source_name || '博主'}</span>
+                    <span>·</span>
+                    <span>{formatTime(s.created_at)}</span>
+                    {s.url && (
+                      <>
+                        <span>·</span>
+                        <a href={s.url} target="_blank" rel="noreferrer">看原视频 ↗</a>
+                      </>
+                    )}
+                  </div>
+                </article>
               ))}
             </div>
           )}

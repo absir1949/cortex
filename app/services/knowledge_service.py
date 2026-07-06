@@ -175,7 +175,28 @@ class KnowledgeService:
         return new_items
 
     def _analyze_source(self, source, items: list[dict]) -> Optional[str]:
-        """构造 prompt 喂 LLM"""
+        """构造 prompt 喂 LLM。内容过多时分批，合并结果。"""
+        BATCH = 8  # 每批最多分析 8 条，避免单次 LLM 调用输入过长超时
+        if not items:
+            return None
+
+        # 少于一批直接分析
+        if len(items) <= BATCH:
+            return self._analyze_one_batch(source, items)
+
+        # 分批分析，合并
+        parts: list[str] = []
+        for i in range(0, len(items), BATCH):
+            batch = items[i:i + BATCH]
+            r = self._analyze_one_batch(source, batch)
+            if r:
+                parts.append(r)
+        if not parts:
+            return None
+        return "\n\n---\n\n".join(parts)
+
+    def _analyze_one_batch(self, source, items: list[dict]) -> Optional[str]:
+        """分析单批内容"""
         transcripts_block = self._build_transcripts_block(items)
         comments_block = self._build_comments_block(items)
 
@@ -195,7 +216,7 @@ class KnowledgeService:
                 ],
                 config=config_service.get_llm_config(),
             )
-        except Exception as e:
+        except Exception:
             return None
 
     @staticmethod

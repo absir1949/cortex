@@ -109,6 +109,20 @@ def run_group(group_id: int, force: bool = Query(True), analyze: bool = Query(Tr
     return {"task_id": task_id, "status": "pending"}
 
 
+@router.post("/{group_id}/analyze", status_code=202)
+def analyze_group(group_id: int):
+    """只整理报告，不重新采集。基于已有信号和转录产出日报。"""
+    g = GroupService().get(group_id)
+    if not g:
+        raise HTTPException(404, "group not found")
+    task_id = get_runner().enqueue(
+        TaskKind.ANALYZE,
+        params={"group_id": group_id},
+        group_id=group_id,
+    )
+    return {"task_id": task_id, "status": "pending"}
+
+
 @router.delete("/{group_id}", status_code=204)
 def delete_group(group_id: int, cascade: bool = Query(False)):
     GroupService().delete(group_id, cascade=cascade)
