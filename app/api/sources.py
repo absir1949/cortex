@@ -1,7 +1,7 @@
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
-from app.api.schemas import SourceCreateReq, SourceBrief
+from app.api.schemas import SourceCreateReq, SourceUpdateReq, SourceBrief
 from app.services.source_service import SourceService
 from app.models.group import TaskKind
 from app.tasks import get_runner
@@ -37,6 +37,22 @@ def create_source(group_id: int, req: SourceCreateReq):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return _to_brief(src)
+
+
+@router.patch("/{source_id}", response_model=SourceBrief)
+def update_source(group_id: int, source_id: int, req: SourceUpdateReq):
+    """编辑作者：改名/启停/调整采集参数"""
+    svc = SourceService()
+    src = svc.get(source_id)
+    if not src or src.group_id != group_id:
+        raise HTTPException(404, "source not found")
+    fields = {k: v for k, v in req.model_dump(exclude_unset=True).items() if v is not None}
+    if not fields:
+        return _to_brief(src)
+    updated = svc.update(source_id, **fields)
+    if not updated:
+        raise HTTPException(404, "source not found")
+    return _to_brief(updated)
 
 
 @router.delete("/{source_id}", status_code=204)

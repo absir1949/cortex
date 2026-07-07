@@ -56,7 +56,7 @@ class GroupDetailResp(GroupResp):
 
 class SourceCreateReq(BaseModel):
     type: str                             # creator / keyword
-    platform: str = "douyin"
+    platform: str                         # douyin / wechat_channels / ...（必填，无默认）
     identifier: str
     display_name: str = ""
     interval_hours: Optional[int] = None
@@ -64,6 +64,15 @@ class SourceCreateReq(BaseModel):
     content_limit: Optional[int] = None
     comment_top_n: Optional[int] = None
     resolve_creator: bool = True
+
+
+class SourceUpdateReq(BaseModel):
+    display_name: Optional[str] = None
+    enabled: Optional[bool] = None
+    interval_hours: Optional[int] = None
+    days: Optional[int] = None
+    content_limit: Optional[int] = None
+    comment_top_n: Optional[int] = None
 
 
 # ---------- Research ----------

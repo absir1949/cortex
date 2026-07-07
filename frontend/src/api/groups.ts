@@ -68,6 +68,22 @@ export const useDeleteSource = (groupId: number) => {
   })
 }
 
+export const useUpdateSource = (groupId: number) => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: {
+      sourceId: number
+      display_name?: string
+      enabled?: boolean
+      interval_hours?: number
+      days?: number
+      content_limit?: number
+      comment_top_n?: number
+    }) => api.patch<SourceBrief>(`/groups/${groupId}/sources/${body.sourceId}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['group', groupId] }),
+  })
+}
+
 export const useRunSource = (groupId: number) =>
   useMutation({
     mutationFn: (sourceId: number) =>

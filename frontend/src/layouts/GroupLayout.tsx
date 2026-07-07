@@ -6,6 +6,7 @@ import {
   useUpdateGroup,
   useCreateSource,
   useDeleteSource,
+  useUpdateSource,
   useRunSource,
   useRunGroup,
   useAnalyzeGroup,
@@ -13,6 +14,7 @@ import {
 } from '../api/groups'
 import { useSchedulerJobs } from '../api/scheduler'
 import { useTask } from '../api/tasks'
+import { usePlatforms } from '../api/platforms'
 
 function formatTime(value?: string | null) {
   if (!value) return '待安排'
@@ -33,18 +35,23 @@ export default function GroupLayout() {
   const createSrc = useCreateSource(gid)
   const deleteSrc = useDeleteSource(gid)
   const runSrc = useRunSource(gid)
+  const updateSrc = useUpdateSource(gid)
   const runGroup = useRunGroup(gid)
   const analyzeGroup = useAnalyzeGroup(gid)
   const deleteGroup = useDeleteGroup()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { data: platforms = [] } = usePlatforms()
 
   const [showAdd, setShowAdd] = useState(false)
   const [notice, setNotice] = useState('')
   const [analyzeTaskId, setAnalyzeTaskId] = useState<string | null>(null)
   const analyzeTask = useTask(analyzeTaskId)
+  const [editingSid, setEditingSid] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState({ display_name: '', enabled: true })
   const [sourceForm, setSourceForm] = useState({
     type: 'creator' as 'creator' | 'keyword',
+    platform: 'douyin',
     identifier: '',
     display_name: '',
   })
@@ -93,7 +100,7 @@ export default function GroupLayout() {
     if (!sourceForm.identifier.trim()) return
     await createSrc.mutateAsync({
       type: sourceForm.type,
-      platform: 'douyin',
+      platform: sourceForm.platform,
       identifier: sourceForm.identifier.trim(),
       display_name: sourceForm.display_name.trim(),
       interval_hours: settings.interval_hours,
@@ -102,8 +109,20 @@ export default function GroupLayout() {
       comment_top_n: settings.comment_top_n,
     })
     setNotice('已加入关注列表，下次更新会一起整理。')
-    setSourceForm({ type: 'creator', identifier: '', display_name: '' })
+    setSourceForm({ type: 'creator', platform: 'douyin', identifier: '', display_name: '' })
     setShowAdd(false)
+  }
+
+  const onEditSource = (s: { id: number; display_name: string; enabled: boolean }) => {
+    setEditingSid(s.id)
+    setEditForm({ display_name: s.display_name, enabled: s.enabled })
+  }
+
+  const onSaveEdit = async () => {
+    if (editingSid === null) return
+    await updateSrc.mutateAsync({ sourceId: editingSid, ...editForm })
+    setNotice('已保存修改。')
+    setEditingSid(null)
   }
 
   const onRunSource = async (sid: number) => {
@@ -195,9 +214,22 @@ export default function GroupLayout() {
                   <option value="creator">作者</option>
                   <option value="keyword">关键词</option>
                 </select>
+                {sourceForm.type === 'creator' && (
+                  <select
+                    className="input"
+                    value={sourceForm.platform}
+                    onChange={(e) => setSourceForm({ ...sourceForm, platform: e.target.value })}
+                  >
+                    {platforms.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                  </select>
+                )}
                 <input
                   className="input"
-                  placeholder={sourceForm.type === 'creator' ? '抖音号 / sec_uid' : '关键词'}
+                  placeholder={
+                    sourceForm.type === 'creator'
+                      ? (platforms.find((p) => p.id === sourceForm.platform)?.identifier_hint || '平台 ID')
+                      : '关键词'
+                  }
                   value={sourceForm.identifier}
                   onChange={(e) => setSourceForm({ ...sourceForm, identifier: e.target.value })}
                 />
@@ -221,18 +253,43 @@ export default function GroupLayout() {
                     {firstChar(s.display_name)}
                   </Link>
                   <div className="follow-body">
-                    <Link to={`/groups/${gid}/creators/${s.id}`} className="follow-link">
-                      <strong>{s.display_name}</strong>
-                    </Link>
-                    <small>{s.type === 'creator' ? '作者' : '关键词'} · {formatTime(s.last_check)}</small>
-                    {s.last_error && <em>{s.last_error.slice(0, 80)}</em>}
+                    {editingSid === s.id ? (
+                      <div className="edit-source-form">
+                        <input
+                          className="input"
+                          value={editForm.display_name}
+                          onChange={(e) => setEditForm({ ...editForm, display_name: e.target.value })}
+                        />
+                        <label className="edit-source-toggle">
+                          <input
+                            type="checkbox"
+                            checked={editForm.enabled}
+                            onChange={(e) => setEditForm({ ...editForm, enabled: e.target.checked })}
+                          />
+                          启用
+                        </label>
+                        <button className="pill-button small primary" onClick={onSaveEdit} disabled={updateSrc.isPending}>
+                          保存
+                        </button>
+                        <button className="pill-button small" onClick={() => setEditingSid(null)}>取消</button>
+                      </div>
+                    ) : (
+                      <>
+                        <Link to={`/groups/${gid}/creators/${s.id}`} className="follow-link">
+                          <strong>{s.display_name}</strong>
+                        </Link>
+                        <small>{s.platform} · {s.type === 'creator' ? '作者' : '关键词'} · {formatTime(s.last_check)}</small>
+                        {s.last_error && <em>{s.last_error.slice(0, 80)}</em>}
+                      </>
+                    )}
                   </div>
-                  <div className="follow-actions">
-                    <button onClick={() => onRunSource(s.id)}>刷新</button>
-                    <button onClick={() => confirm(`删除 ${s.display_name}?`) && deleteSrc.mutate(s.id)}>
-                      移除
-                    </button>
-                  </div>
+                  {editingSid !== s.id && (
+                    <div className="follow-actions">
+                      <button onClick={() => onRunSource(s.id)}>刷新</button>
+                      <button onClick={() => onEditSource({ id: s.id, display_name: s.display_name, enabled: s.enabled })}>编辑</button>
+                      <button onClick={() => confirm(`删除 ${s.display_name}?`) && deleteSrc.mutate(s.id)}>移除</button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

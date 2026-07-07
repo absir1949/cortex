@@ -24,6 +24,8 @@ from app.platforms.base import PlatformAdapter, Capability
 
 class DouyinAdapter(PlatformAdapter):
     platform = "douyin"
+    platform_label = "抖音"
+    identifier_hint = "抖音号 / sec_uid (MS4w...)"
 
     def __init__(self):
         self.api_key = settings.tikhub_api_key
@@ -37,7 +39,53 @@ class DouyinAdapter(PlatformAdapter):
             Capability.SEARCH,
             Capability.FETCH_COMMENTS,
             Capability.DOWNLOAD_MEDIA,
+            Capability.RESOLVE_IDENTIFIER,
         }
+
+    # ------ 解析用户输入 → sec_uid ------
+
+    def resolve_identifier(self, raw_input: str, display_name: str = "") -> tuple[str, str]:
+        """把用户输入（昵称/抖音号/sec_uid）解析成 sec_uid。
+
+        - 已是 sec_uid（MS4w 前缀）直接用
+        - 否则搜抖音，按 display_name 匹配最可能的作者
+        """
+        identifier = raw_input.strip()
+        if identifier.startswith("MS4w"):
+            return identifier, display_name or identifier
+
+        clean = identifier.strip().rstrip("/")
+        if "/" in clean:
+            clean = clean.split("/")[-1] or clean
+
+        queries: list[str] = []
+        if display_name:
+            queries.append(f"{display_name} {clean}".strip())
+            queries.append(display_name)
+        queries.append(clean)
+
+        seen: set[str] = set()
+        best = None
+        for q in queries:
+            if not q or q in seen:
+                continue
+            seen.add(q)
+            try:
+                results = self.search(q, limit=10, days=180)
+            except Exception:
+                continue
+            for item in results:
+                if not item.author_id:
+                    continue
+                if display_name and item.author_name == display_name:
+                    return item.author_id, item.author_name
+                if display_name and display_name.replace(" ", "") in item.author_name.replace(" ", ""):
+                    return item.author_id, item.author_name
+                if best is None:
+                    best = item
+        if best and best.author_id:
+            return best.author_id, best.author_name or display_name or raw_input
+        raise ValueError(f"无法解析抖音作者: {raw_input}")
 
     # ------ 内部工具 ------
 

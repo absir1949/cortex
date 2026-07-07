@@ -4,6 +4,8 @@ from typing import Optional
 from app.db.engine import get_session
 from app.db.repos import GroupRepo, SourceRepo, CreatorRepo
 from app.db.schema import Source, KnowledgeGroup
+from app.platforms import get_adapter
+from app.platforms.base import Capability
 from app.models.group import SourceType
 from app.storage.paths import slugify
 
@@ -36,11 +38,13 @@ class SourceService:
         type_value = type.value if isinstance(type, SourceType) else type
         resolved_identifier = identifier.strip()
         resolved_name = display_name.strip()
-        if resolve_creator and type_value == SourceType.CREATOR.value and platform == "douyin":
-            resolved_identifier, resolved_name = self._resolve_douyin_creator(
-                resolved_identifier,
-                resolved_name,
-            )
+        # 解析用户输入 → 平台唯一 ID（每个平台有自己的解析逻辑）
+        if resolve_creator and type_value == SourceType.CREATOR.value:
+            adapter = get_adapter(platform)
+            if adapter and adapter.has(Capability.RESOLVE_IDENTIFIER):
+                resolved_identifier, resolved_name = adapter.resolve_identifier(
+                    resolved_identifier, resolved_name,
+                )
         with get_session() as s:
             group = GroupRepo(s).get(group_id)
             if not group:
@@ -80,51 +84,6 @@ class SourceService:
                 directory=directory,
             )
             return SourceRepo(s).create(src)
-
-    @staticmethod
-    def _resolve_douyin_creator(identifier: str, display_name: str = "") -> tuple[str, str]:
-        """Resolve a human-facing Douyin handle/name into sec_uid when possible."""
-        if identifier.startswith("MS4w"):
-            return identifier, display_name or identifier
-
-        from app.platforms import get_adapter
-
-        adapter = get_adapter("douyin")
-        if not adapter:
-            return identifier, display_name or identifier
-
-        clean_identifier = identifier.strip().rstrip("/")
-        if "/" in clean_identifier:
-            clean_identifier = clean_identifier.split("/")[-1] or clean_identifier
-
-        queries: list[str] = []
-        if display_name:
-            queries.append(f"{display_name} {clean_identifier}".strip())
-            queries.append(display_name)
-        queries.append(clean_identifier)
-
-        seen: set[str] = set()
-        best = None
-        for q in queries:
-            if not q or q in seen:
-                continue
-            seen.add(q)
-            try:
-                results = adapter.search(q, limit=10, days=180)
-            except Exception:
-                continue
-            for item in results:
-                if not item.author_id:
-                    continue
-                if display_name and item.author_name == display_name:
-                    return item.author_id, item.author_name
-                if display_name and display_name.replace(" ", "") in item.author_name.replace(" ", ""):
-                    return item.author_id, item.author_name
-                if best is None:
-                    best = item
-        if best and best.author_id:
-            return best.author_id, best.author_name or display_name or identifier
-        raise ValueError(f"无法解析抖音作者: {identifier}")
 
     def update(self, source_id: int, **fields) -> Optional[Source]:
         with get_session() as s:

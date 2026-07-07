@@ -42,7 +42,8 @@ class ResearchService:
         sys_cfg = config_service.effective_for_group(group_id) if group_id else config_service.all_system_values(redact_secrets=False)
         limit = search_limit or sys_cfg.get("research_search_limit", 10)
         top_n = comment_top_n or sys_cfg.get("comment_top_n", 20)
-        platform_list = platforms or ["douyin"]
+        from app.platforms import list_platforms
+        platform_list = platforms or list_platforms()
 
         workspace = paths.research_dir_for_task(task_id or datetime.now().strftime("research_%Y%m%d_%H%M%S"))
         workspace.mkdir(parents=True, exist_ok=True)

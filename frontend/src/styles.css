@@ -428,6 +428,26 @@ button:disabled {
   opacity: 0.7;
 }
 
+/* 编辑作者的内联表单 */
+.edit-source-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.edit-source-form .input {
+  flex: 1;
+  min-width: 120px;
+}
+.edit-source-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8125rem;
+  color: #66756d;
+  cursor: pointer;
+}
+
 /* ===== 信号面板（时间流 + 视觉分层）===== */
 
 /* 信号流容器 */
