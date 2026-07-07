@@ -27,7 +27,7 @@ export default function Dashboard() {
           <div className="empty-feed">
             {groups.length === 0 ? (
               <>
-                <p>还没有专题。先订阅一个主题，Cortex 会帮你盯着。</p>
+                <p>还没有专题。先订阅一个主题，听风会帮你盯着。</p>
                 <button className="pill-button primary" onClick={() => setShowCreate(true)}>订阅第一个专题</button>
               </>
             ) : (

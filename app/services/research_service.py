@@ -219,7 +219,7 @@ class ResearchService:
                 lines.append(f"- 评论条数：{len(it['comments'])}")
             lines.append("")
         lines.append("---")
-        lines.append("*由 Cortex 按需研究自动生成*")
+        lines.append("*由听风按需研究自动生成*")
         report_md.write_text("\n".join(lines), encoding="utf-8")
 
         # 写 evidence.json（给之后检索用）

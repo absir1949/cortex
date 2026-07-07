@@ -1,4 +1,4 @@
-"""Cortex FastAPI 入口
+"""听风 FastAPI 入口
 
 生命周期：
   startup:
@@ -46,7 +46,7 @@ logger = logging.getLogger("cortex")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Cortex starting...")
+    logger.info("听风 starting...")
     settings.ensure_dirs()
 
     # 数据库迁移（v1 等）
@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    logger.info("Cortex shutting down...")
+    logger.info("听风 shutting down...")
     scheduler.shutdown(wait=False)
     runner.shutdown(wait=False)
     set_runner(None)
@@ -81,8 +81,8 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Cortex",
-        description="跨平台社交媒体情报代理",
+        title="听风",
+        description="你的行业听风者（cortex）",
         version="0.2.0",
         lifespan=lifespan,
     )
@@ -150,7 +150,7 @@ def create_app() -> FastAPI:
     else:
         @app.get("/")
         def root():
-            return {"message": "Cortex API. 访问 /docs 查看端点。"}
+            return {"message": "听风 API. 访问 /docs 查看端点。"}
 
     return app
 

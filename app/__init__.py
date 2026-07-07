@@ -1,4 +1,4 @@
-"""Cortex - 独立产品化升级版
+"""听风 (cortex) - 独立产品化升级版
 
 架构说明：
 - app/models/ — 数据模型（Pydantic + SQLModel）

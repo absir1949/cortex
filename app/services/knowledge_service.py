@@ -341,7 +341,7 @@ class KnowledgeService:
         total_repeats = sum(r.get("repeat_count", 0) for r in results)
 
         lines = [
-            "# Cortex 知识报告",
+            "# 听风知识报告",
             f"**生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "",
             f"**本期新信号**：{total_new_signals} 条新观点 · {total_repeats} 条内容与既有观点重复（已折叠）",
@@ -374,7 +374,7 @@ class KnowledgeService:
             lines.append("")
             lines.append("---")
             lines.append("")
-        lines.append("*由 Cortex 自动生成*")
+        lines.append("*由听风自动生成*")
 
         md_path.write_text("\n".join(lines), encoding="utf-8")
         json_path.write_text(

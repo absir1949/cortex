@@ -29,8 +29,8 @@ export default function App() {
           <NavLink to="/" className="brand">
             <span className="brand-mark">C</span>
             <span>
-              <strong>Cortex</strong>
-              <small>你的行业情报订阅</small>
+              <strong>听风</strong>
+              <small>你的行业听风者</small>
             </span>
           </NavLink>
           <nav className="top-nav">
