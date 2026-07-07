@@ -105,4 +105,5 @@ export interface Signal {
   platform?: string
   url?: string
   title?: string
+  group_name?: string
 }

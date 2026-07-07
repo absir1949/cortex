@@ -131,6 +131,32 @@ button:disabled {
   @apply space-y-8;
 }
 
+/* 首页全局信号流 */
+.feed-section {
+  @apply rounded-[1.25rem] border border-border bg-panel p-6 shadow-sm;
+}
+.feed-header {
+  margin-bottom: 0.5rem;
+}
+.feed-header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #17221d;
+  margin: 4px 0;
+}
+.feed-header p {
+  font-size: 0.875rem;
+  color: #66756d;
+  margin: 0;
+}
+.empty-feed {
+  @apply py-10 text-center;
+  color: #66756d;
+}
+.empty-feed p {
+  margin-bottom: 12px;
+}
+
 .soft-label {
   @apply text-xs font-semibold text-accentAlt uppercase;
   letter-spacing: 0.08em;
@@ -354,6 +380,39 @@ button:disabled {
 }
 .insight-card-row .accent {
   color: #149b68;
+}
+
+/* ===== 转录原文「查看原文」点击展开 ===== */
+.transcript-toggle-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.75rem;
+  color: #149b68;
+  cursor: pointer;
+  text-decoration: none;
+}
+.transcript-toggle-btn:hover {
+  text-decoration: underline;
+}
+.transcript-block {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f4f7f5;
+  border: 1px solid #dce6dd;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.transcript-block-body {
+  font-size: 0.875rem;
+  line-height: 1.7;
+  color: #17221d;
+  white-space: pre-wrap;
+}
+.transcript-block-loading {
+  font-size: 0.8125rem;
+  color: #66756d;
 }
 
 /* 博主列表项的可点击链接（头像/名字）*/

@@ -26,8 +26,17 @@ def _to_brief(sig) -> dict:
 
 
 def _enrich_with_content(signals: list, sources: dict) -> list:
-    """给信号列表附加 source_name/platform/url/title（从 metadata 读，按 source 批量）"""
-    # 按 source_id 收集 content_id，批量读 metadata，避免逐条读盘
+    """给信号列表附加 source_name/platform/url/title/group_name"""
+    # 批量查 group_name（知识库名），供首页全局流显示来源
+    group_ids = {src.group_id for src in sources.values() if src.group_id}
+    group_names: dict[int, str] = {}
+    if group_ids:
+        with get_session() as s:
+            for gid in group_ids:
+                g = GroupRepo(s).get(gid)
+                if g:
+                    group_names[gid] = g.name
+
     storage_cache: dict[int, StorageManager] = {}
     out = []
     for sig in signals:
@@ -35,6 +44,7 @@ def _enrich_with_content(signals: list, sources: dict) -> list:
         src = sources.get(sig.source_id)
         d["source_name"] = src.display_name if src else ""
         d["platform"] = src.platform if src else ""
+        d["group_name"] = group_names.get(src.group_id, "") if src else ""
         # 读 url/title
         url, title = "", ""
         if src:

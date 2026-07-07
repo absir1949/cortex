@@ -34,6 +34,7 @@ from app.api import reports as reports_api
 from app.api import config as config_api
 from app.api import signals as signals_api
 from app.api import creators as creators_api
+from app.api import contents as contents_api
 from app.tasks import get_runner
 from app.tasks.handlers import ingest_handler, research_handler, analyze_handler  # noqa: F401 注册 handlers
 from app.scheduler import get_scheduler
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
     app.include_router(config_api.router)
     app.include_router(signals_api.router)
     app.include_router(creators_api.router)
+    app.include_router(contents_api.router)
 
     # 调度器管理（热重载 job 定义）
     @app.post("/api/scheduler/reload")

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { useSourceDetail, useSourceContents, useSourceProfile } from '../api/sources'
+import TranscriptCard from '../components/TranscriptCard'
 
 function formatTime(value?: string | null) {
   if (!value) return ''
@@ -111,11 +112,16 @@ export default function CreatorDetail() {
                       <span>👍 {c.statistics.digg_count}</span>
                     </>
                   )}
-                  {c.transcribed && <span>· 已转录</span>}
                   {c.url && (
                     <>
                       <span>·</span>
                       <a href={c.url} target="_blank" rel="noreferrer">看原视频 ↗</a>
+                    </>
+                  )}
+                  {c.transcribed && (
+                    <>
+                      <span>·</span>
+                      <TranscriptCard contentId={c.content_id} />
                     </>
                   )}
                 </div>
