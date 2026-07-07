@@ -180,9 +180,10 @@ class IngestService:
                 result["error"] = str(e)
             return result
 
-        # 并行执行下载+转录+评论（IO 密集型，高并发不影响 CPU/内存）
+        # 并行执行下载+转录+评论
+        # 并发数受限于：TikHub CDN 限流 + 解密服务并发 + 阿里云转录并发
         new_count = 0
-        with ThreadPoolExecutor(max_workers=10) as pool:
+        with ThreadPoolExecutor(max_workers=5) as pool:
             futures = {pool.submit(process_content, c): c for c in new_contents}
             for fut in as_completed(futures):
                 if is_cancelled and is_cancelled():

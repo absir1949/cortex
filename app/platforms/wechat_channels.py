@@ -237,13 +237,19 @@ class WechatChannelsAdapter(PlatformAdapter):
         if not decode_key:
             return False
 
-        # 1. 下载加密视频
-        try:
-            resp = requests.get(full_url, timeout=120, stream=True)
-            if resp.status_code != 200:
-                return False
-            encrypted = resp.content
-        except Exception:
+        # 1. 下载加密视频（带重试，CDN 偶尔限流）
+        encrypted = None
+        for attempt in range(3):
+            try:
+                resp = requests.get(full_url, timeout=120)
+                if resp.status_code == 200 and len(resp.content) > 10000:
+                    encrypted = resp.content
+                    break
+            except Exception:
+                pass
+            import time
+            time.sleep(2)
+        if not encrypted:
             return False
 
         # 2. 调解密服务
