@@ -78,8 +78,12 @@ class PlatformAdapter(ABC):
         content_id: str,
         top_n: int = 20,
         fetch_replies: bool = True,
+        creator_id: str = "",
     ) -> list[Comment]:
-        """抓取视频评论（含二级回复）"""
+        """抓取视频评论（含二级回复）。
+
+        creator_id 是博主的平台 ID（如视频号 finder username），部分平台评论接口需要它。
+        """
         raise NotImplementedError(f"{self.platform} does not support FETCH_COMMENTS")
 
     def download_media(self, content: Content, output_path: str) -> bool:

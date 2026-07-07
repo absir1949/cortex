@@ -184,18 +184,18 @@ class WechatChannelsAdapter(PlatformAdapter):
         content_id: str,
         top_n: int = 20,
         fetch_replies: bool = True,
+        creator_id: str = "",
     ) -> list[Comment]:
-        """抓视频号作品评论。content_id 是作品 id（object_id）。
+        """抓视频号作品评论。content_id 是作品 id，creator_id 是 finder username。
 
-        真实结构（实测）：data.comments 列表，每条有 comment_id/nickname/content/like_count/create_time。
-        需要同时传 object_id 和 username。
+        TikHub 视频号评论接口需要同时传 object_id 和 username。
         """
-        # 评论接口需要 username，但 fetch_comments 签名只有 content_id
-        # username 从 content_id 关联不到，这里先尝试不带 username（部分情况可用）
+        if not creator_id:
+            return []
         try:
             data = self._post(
                 "/api/v1/wechat_channels/v2/fetch_video_comments",
-                {"object_id": content_id, "cursor": "", "raw": False},
+                {"object_id": content_id, "username": creator_id, "cursor": "", "raw": False},
             )
         except Exception:
             return []

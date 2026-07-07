@@ -139,6 +139,9 @@ class IngestService:
                             from app.transcribe import transcribe_video
                             transcript = transcribe_video(str(final_path))
                         storage.save_transcript(c.content_id, transcript, c.create_time)
+                        # 清掉 API 层缓存的旧转录文本
+                        from app.api.contents import invalidate_transcript_cache
+                        invalidate_transcript_cache(c.content_id)
                     except Exception as e:
                         self._log(log_cb, f"  [warn] 转录失败 {c.title[:30]}: {e}")
 
@@ -149,6 +152,7 @@ class IngestService:
                             c.content_id,
                             top_n=config.get("comment_top_n", 20),
                             fetch_replies=True,
+                            creator_id=source.identifier,
                         )
                         storage.save_comments(
                             c.content_id,

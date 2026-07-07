@@ -284,6 +284,7 @@ class DouyinAdapter(PlatformAdapter):
         content_id: str,
         top_n: int = 20,
         fetch_replies: bool = True,
+        creator_id: str = "",
     ) -> list[Comment]:
         """抓一级评论 + 可选二级回复"""
         # 一级

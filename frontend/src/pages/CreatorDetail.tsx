@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
@@ -40,20 +40,35 @@ export default function CreatorDetail() {
   const [items, setItems] = useState<SourceContent[]>([])
   const [total, setTotal] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
-  const { data: pageData } = useSourceContents(gid, sourceId, PAGE_SIZE, page * PAGE_SIZE)
+  const { data: pageData, isError: pageError } = useSourceContents(gid, sourceId, PAGE_SIZE, page * PAGE_SIZE)
+  const loadedOffsetRef = useRef<number>(-1)  // 追踪已处理的 offset，防竞态重复
 
   useEffect(() => {
     setPage(0)
     setItems([])
+    setTotal(0)
+    setLoadingMore(false)
+    loadedOffsetRef.current = -1
   }, [sourceId])
 
   useEffect(() => {
-    if (pageData) {
-      setItems((prev) => page === 0 ? pageData.items : [...prev, ...pageData.items])
-      setTotal(pageData.total)
+    if (pageError) {
       setLoadingMore(false)
+      return
     }
-  }, [pageData, page])
+    if (!pageData) return
+    const offset = page * PAGE_SIZE
+    // 已经处理过这个 offset 的数据，不重复（防竞态）
+    if (loadedOffsetRef.current === offset) return
+    loadedOffsetRef.current = offset
+    setTotal(pageData.total)
+    if (offset === 0) {
+      setItems(pageData.items)
+    } else {
+      setItems((prev) => [...prev, ...pageData.items])
+    }
+    setLoadingMore(false)
+  }, [pageData, pageError, page])
 
   useEffect(() => {
     if (!refreshTaskId || !refreshTask.data) return
@@ -64,6 +79,7 @@ export default function CreatorDetail() {
       setRefreshTaskId(null)
       setPage(0)
       setItems([])
+      loadedOffsetRef.current = -1
       qc.invalidateQueries({ queryKey: ['source-contents', gid, sourceId] })
       qc.invalidateQueries({ queryKey: ['source-profile', gid, sourceId] })
     } else if (st === 'failed' || st === 'canceled') {

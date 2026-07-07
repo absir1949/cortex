@@ -142,7 +142,7 @@ class ResearchService:
                 stats["comment_hit"] += 1
             elif adapter.has(Capability.FETCH_COMMENTS):
                 try:
-                    comments = adapter.fetch_comments(cid, top_n=top_n, fetch_replies=True)
+                    comments = adapter.fetch_comments(cid, top_n=top_n, fetch_replies=True, creator_id=c.author_id)
                     item["comments"] = [cm.model_dump() for cm in comments]
                     (workspace / "comments" / f"{cid}.json").write_text(
                         json.dumps(item["comments"], ensure_ascii=False, indent=2),
