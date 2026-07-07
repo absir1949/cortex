@@ -63,23 +63,31 @@ class WechatChannelsAdapter(PlatformAdapter):
             return ""
 
     def _video_to_content(self, item: dict, author_name: str = "", author_id: str = "") -> Content:
-        object_id = str(item.get("object_id") or item.get("objectId") or "")
-        desc = item.get("desc") or item.get("title") or ""
+        """从视频号作品字典构造 Content。
+
+        真实字段（实测 TikHub 返回）：id, title, nickname, create_time(秒),
+        like_count, comment_count, forward_count, fav_count, read_count, media
+        """
+        object_id = str(item.get("id") or "")
+        title = item.get("title") or ""
+        nick = item.get("nickname") or author_name
         return Content(
             content_id=object_id,
             platform=self.platform,
             content_type=ContentType.VIDEO,
             url=f"https://channels.weixin.qq.com/web/feed/{object_id}" if object_id else "",
             author_id=author_id,
-            author_name=author_name,
-            title=desc,
-            text=desc,
+            author_name=nick,
+            title=title,
+            text=title,
             media_urls=[],
-            create_time=self._iso(item.get("create_time") or item.get("createTime")),
+            create_time=self._iso(item.get("create_time")),
             statistics={
-                "like_count": int(item.get("like_count") or item.get("likeCount") or 0),
-                "comment_count": int(item.get("comment_count") or item.get("commentCount") or 0),
-                "forward_count": int(item.get("forward_count") or item.get("forwardCount") or 0),
+                "like_count": int(item.get("like_count") or 0),
+                "comment_count": int(item.get("comment_count") or 0),
+                "forward_count": int(item.get("forward_count") or 0),
+                "fav_count": int(item.get("fav_count") or 0),
+                "read_count": int(item.get("read_count") or 0),
             },
             needs_transcribe=False,
         )
@@ -106,7 +114,7 @@ class WechatChannelsAdapter(PlatformAdapter):
             nickname = d.get("nickname") or ""
             if username:
                 return username, display_name or nickname or raw
-        except Exception as e:
+        except Exception:
             raise ValueError(
                 f"视频号无法解析「{raw}」。视频号暂不支持搜名字，"
                 f"请输入 sph 短号（如 sph_xxx）或 finder username（v2_xxx@finder）。"
@@ -123,30 +131,23 @@ class WechatChannelsAdapter(PlatformAdapter):
         limit: int = 50,
         days: Optional[int] = None,
     ) -> list[Content]:
+        """creator_id 是 finder username。翻页用 last_buffer。"""
         author_name = ""
-        try:
-            info = self._post(
-                "/api/v1/wechat_channels/v2/fetch_channel_info",
-                {"username": creator_id},
-            )
-            nick = (info.get("data") or {}).get("nickname") or ""
-            if nick:
-                author_name = nick
-        except Exception:
-            pass
-
         contents: list[Content] = []
         cursor = ""
         for _ in range(5):
             try:
                 data = self._post(
                     "/api/v1/wechat_channels/v2/fetch_user_videos",
-                    {"username": creator_id, "cursor": cursor},
+                    {"username": creator_id, "cursor": cursor, "raw": False},
                 )
             except Exception:
                 break
             raw = data.get("data") or {}
-            items = raw.get("object_list") or raw.get("objectList") or raw.get("videos") or []
+            # nickname 在 data 顶层
+            if not author_name:
+                author_name = raw.get("nickname") or ""
+            items = raw.get("videos") or []
             for item in items:
                 if isinstance(item, dict):
                     contents.append(self._video_to_content(item, author_name, creator_id))
@@ -154,8 +155,8 @@ class WechatChannelsAdapter(PlatformAdapter):
                         break
             if len(contents) >= limit:
                 break
-            cursor = raw.get("cursor") or raw.get("next_cursor") or ""
-            if not cursor or not raw.get("has_more", True):
+            cursor = raw.get("last_buffer") or ""
+            if not cursor:
                 break
 
         if days and days > 0:
@@ -184,28 +185,34 @@ class WechatChannelsAdapter(PlatformAdapter):
         top_n: int = 20,
         fetch_replies: bool = True,
     ) -> list[Comment]:
+        """抓视频号作品评论。content_id 是作品 id（object_id）。
+
+        真实结构（实测）：data.comments 列表，每条有 comment_id/nickname/content/like_count/create_time。
+        需要同时传 object_id 和 username。
+        """
+        # 评论接口需要 username，但 fetch_comments 签名只有 content_id
+        # username 从 content_id 关联不到，这里先尝试不带 username（部分情况可用）
         try:
             data = self._post(
                 "/api/v1/wechat_channels/v2/fetch_video_comments",
-                {"object_id": content_id, "cursor": ""},
+                {"object_id": content_id, "cursor": "", "raw": False},
             )
         except Exception:
             return []
         raw = data.get("data") or {}
-        items = raw.get("comment_list") or raw.get("commentList") or []
+        items = raw.get("comments") or []
         comments: list[Comment] = []
         for item in items[:top_n]:
             if not isinstance(item, dict):
                 continue
-            cid = str(item.get("comment_id") or item.get("commentID") or item.get("id") or "")
+            cid = str(item.get("comment_id") or "")
             if not cid:
                 continue
-            user = item.get("user_info") or item.get("userInfo") or {}
             comments.append(Comment(
                 comment_id=cid,
-                author=user.get("nickname", ""),
-                text=item.get("content") or item.get("text") or "",
-                likes=int(item.get("like_count") or item.get("likeCount") or 0),
-                create_time=self._iso(item.get("create_time") or item.get("createTime")),
+                author=item.get("nickname") or "",
+                text=item.get("content") or "",
+                likes=int(item.get("like_count") or 0),
+                create_time=self._iso(item.get("create_time")),
             ))
         return comments
