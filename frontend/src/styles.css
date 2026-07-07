@@ -449,6 +449,12 @@ button:disabled {
   font-size: 0.875rem;
   color: #66756d;
 }
+.breadcrumb-bar .back-link {
+  margin-bottom: 0;
+  display: inline;
+  color: #66756d;
+  font-size: 0.875rem;
+}
 .breadcrumb-sep {
   color: #66756d;
 }
