@@ -106,44 +106,44 @@ class IngestService:
         new_contents = [c for c in contents if not storage.exists(c.content_id)]
         self._log(log_cb, f"  新内容: {len(new_contents)} 条（{len(contents) - len(new_contents)} 条已存在）")
 
-        # 3. 每条：下载 → 转录 → 抓评论 → 保存
-        new_count = 0
-        for c in new_contents:
-            if is_cancelled and is_cancelled():
-                break
+        # 3. 并行处理：下载+转录+评论 同时做，观点判定串行（档案锁保证）
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from pathlib import Path
+
+        def process_content(c) -> dict:
+            """单条：下载 → 转录 → 评论 → 保存。返回处理结果。"""
+            result = {"content": c, "transcript": None, "error": None}
             try:
                 # 下载
                 if adapter.has(Capability.DOWNLOAD_MEDIA) and c.media_urls:
                     tmp_path = f"/tmp/{c.content_id}.mp4"
                     if not adapter.download_media(c, tmp_path):
-                        self._log(log_cb, f"  [skip] {c.title[:30]} 下载失败")
-                        continue
-                    file_size = __import__("pathlib").Path(tmp_path).stat().st_size
+                        result["error"] = "下载失败"
+                        return result
+                    file_size = Path(tmp_path).stat().st_size
                     storage.save_video(c.content_id, tmp_path, c.create_time)
                     final_path = storage.base / f"{(c.create_time or '').split('T')[0]}_{c.content_id}.mp4"
-                    __import__("pathlib").Path(tmp_path).unlink(missing_ok=True)
+                    Path(tmp_path).unlink(missing_ok=True)
                 else:
                     file_size = 0
                     final_path = None
 
-                # 转录（先查全局缓存：同一内容被多个组关注时不重复转录，省钱）
-                transcript = None
+                # 转录
                 if config.get("transcribe_enabled", True) and c.should_transcribe() and final_path:
                     try:
                         from app.storage.cache import ContentCache
                         cached = ContentCache().get_transcript(c.content_id)
                         if cached:
-                            transcript = cached
-                            self._log(log_cb, f"  [cache] 转录命中全局缓存，复用")
+                            result["transcript"] = cached
+                            result["cached"] = True
                         else:
                             from app.transcribe import transcribe_video
-                            transcript = transcribe_video(str(final_path))
-                        storage.save_transcript(c.content_id, transcript, c.create_time)
-                        # 清掉 API 层缓存的旧转录文本
+                            result["transcript"] = transcribe_video(str(final_path))
+                        storage.save_transcript(c.content_id, result["transcript"], c.create_time)
                         from app.api.contents import invalidate_transcript_cache
                         invalidate_transcript_cache(c.content_id)
                     except Exception as e:
-                        self._log(log_cb, f"  [warn] 转录失败 {c.title[:30]}: {e}")
+                        result["transcribe_error"] = str(e)
 
                 # 评论
                 if adapter.has(Capability.FETCH_COMMENTS):
@@ -159,8 +159,8 @@ class IngestService:
                             [cm.model_dump() for cm in comments],
                             c.create_time,
                         )
-                    except Exception as e:
-                        self._log(log_cb, f"  [warn] 评论抓取失败: {e}")
+                    except Exception:
+                        pass
 
                 # 元数据
                 storage.save_metadata(c.content_id, {
@@ -174,10 +174,35 @@ class IngestService:
                     "statistics": c.statistics,
                     "downloaded_at": datetime.now().isoformat(),
                     "file_size": file_size,
-                    "transcribed": transcript is not None,
+                    "transcribed": result["transcript"] is not None,
                 })
+            except Exception as e:
+                result["error"] = str(e)
+            return result
 
-                # 观点判定（有 transcript 才判，失败不阻塞采集）
+        # 并行执行下载+转录+评论（max_workers=3 平衡速度和 API 限制）
+        new_count = 0
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {pool.submit(process_content, c): c for c in new_contents}
+            for fut in as_completed(futures):
+                if is_cancelled and is_cancelled():
+                    break
+                c = futures[fut]
+                try:
+                    result = fut.result()
+                except Exception as e:
+                    self._log(log_cb, f"  ✗ {c.title[:30]}: {e}")
+                    continue
+                if result.get("error"):
+                    self._log(log_cb, f"  [skip] {c.title[:30]} {result['error']}")
+                    continue
+
+                transcript = result.get("transcript")
+                tlen = len(transcript) if transcript else 0
+                cached_tag = " [cache]" if result.get("cached") else ""
+                self._log(log_cb, f"  ✓ {c.title[:40]}{' [+' + str(tlen) + '字]' if tlen else ''}{cached_tag}")
+
+                # 观点判定（串行：档案更新有锁，LLM 调用不并行避免限流）
                 if transcript:
                     try:
                         from app.services.signal_service import SignalService
@@ -195,8 +220,6 @@ class IngestService:
                         self._log(log_cb, f"  [warn] 观点判定失败: {e}")
 
                 new_count += 1
-                self._log(log_cb, f"  ✓ {c.title[:40]}{' [+' + str(len(transcript)) + '字]' if transcript else ''}")
-            except Exception as e:
                 self._log(log_cb, f"  ✗ {c.title[:30]}: {e}")
 
         # 4. 标记已检查
