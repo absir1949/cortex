@@ -98,19 +98,23 @@ export default function GroupLayout() {
   const onAddSource = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!sourceForm.identifier.trim()) return
-    await createSrc.mutateAsync({
-      type: sourceForm.type,
-      platform: sourceForm.platform,
-      identifier: sourceForm.identifier.trim(),
-      display_name: sourceForm.display_name.trim(),
-      interval_hours: settings.interval_hours,
-      days: settings.days,
-      content_limit: settings.content_limit,
-      comment_top_n: settings.comment_top_n,
-    })
-    setNotice('已加入关注列表，下次更新会一起整理。')
-    setSourceForm({ type: 'creator', platform: 'douyin', identifier: '', display_name: '' })
-    setShowAdd(false)
+    try {
+      await createSrc.mutateAsync({
+        type: sourceForm.type,
+        platform: sourceForm.platform,
+        identifier: sourceForm.identifier.trim(),
+        display_name: sourceForm.display_name.trim(),
+        interval_hours: settings.interval_hours,
+        days: settings.days,
+        content_limit: settings.content_limit,
+        comment_top_n: settings.comment_top_n,
+      })
+      setNotice('已加入关注列表，下次更新会一起整理。')
+      setSourceForm({ type: 'creator', platform: 'douyin', identifier: '', display_name: '' })
+      setShowAdd(false)
+    } catch (err: any) {
+      setNotice('添加失败：' + (err?.message || '未知错误'))
+    }
   }
 
   const onEditSource = (s: { id: number; display_name: string; enabled: boolean }) => {

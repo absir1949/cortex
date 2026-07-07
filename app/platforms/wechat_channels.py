@@ -24,7 +24,7 @@ from app.platforms.base import PlatformAdapter, Capability
 class WechatChannelsAdapter(PlatformAdapter):
     platform = "wechat_channels"
     platform_label = "视频号"
-    identifier_hint = "视频号名字 / sph 号"
+    identifier_hint = "sph 短号或 finder username（视频号暂不支持搜名字）"
 
     def __init__(self):
         self.api_key = settings.tikhub_api_key
@@ -87,9 +87,15 @@ class WechatChannelsAdapter(PlatformAdapter):
     # ------ 解析用户输入 → finder username ------
 
     def resolve_identifier(self, raw_input: str, display_name: str = "") -> tuple[str, str]:
+        """视频号不支持搜名字。用户必须输入 sph 短号或 finder username。
+
+        sph 短号会通过 fetch_channel_id_to_username 转成 finder username。
+        """
         raw = raw_input.strip()
+        # 已是 finder username
         if raw.startswith("v2_") and "@finder" in raw:
             return raw, display_name or raw
+        # 尝试当作 channel_id（sph 短号或其他 ID）转换
         try:
             data = self._post(
                 "/api/v1/wechat-channels-v2-api/fetch_channel_id_to_username",
@@ -99,8 +105,13 @@ class WechatChannelsAdapter(PlatformAdapter):
             if username:
                 return username, display_name or raw
         except Exception as e:
-            raise ValueError(f"视频号短号转换失败: {raw} ({e})")
-        raise ValueError(f"无法解析视频号作者: {raw}")
+            raise ValueError(
+                f"视频号无法解析「{raw}」。视频号暂不支持搜名字，"
+                f"请输入 sph 短号（如 sph_xxx）或 finder username（v2_xxx@finder）。"
+            )
+        raise ValueError(
+            f"视频号无法解析「{raw}」。请确认输入的是 sph 短号或 finder username。"
+        )
 
     # ------ 博主作品 ------
 
