@@ -428,6 +428,37 @@ button:disabled {
   opacity: 0.7;
 }
 
+/* 作者主页操作栏 */
+.creator-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.creator-days-select {
+  width: auto;
+  min-width: 90px;
+  font-size: 0.8125rem;
+}
+
+/* 面包屑栏（作者主页用，替代专题 hero）*/
+.breadcrumb-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 8px;
+  font-size: 0.875rem;
+}
+.breadcrumb-sep {
+  color: #66756d;
+}
+.breadcrumb-group {
+  color: #66756d;
+  text-decoration: none;
+}
+.breadcrumb-group:hover {
+  color: #149b68;
+}
+
 /* 编辑作者的内联表单 */
 .edit-source-form {
   display: flex;

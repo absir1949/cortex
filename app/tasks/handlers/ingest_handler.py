@@ -30,11 +30,16 @@ def handle_ingest(task: Task, ctx: TaskContext) -> dict:
         src = SourceService().get(source_id)
         if not src:
             raise ValueError(f"source {source_id} not found")
-        ctx.log(f"开始采集源: {src.display_name}")
+        # 单源刷新：支持 force 和 days 覆盖（作者主页"刷新这个作者"用）
+        force = bool(params.get("force", True))
+        days_override = params.get("days")
+        ctx.log(f"开始采集源: {src.display_name}" + (f"（回看 {days_override} 天）" if days_override else ""))
         n = svc.run_source(
             src,
             log_cb=lambda m: ctx.log(m),
             is_cancelled=ctx.is_cancelled,
+            force=force,
+            days_override=days_override,
         )
         return {"new_contents": n, "source_id": source_id}
 

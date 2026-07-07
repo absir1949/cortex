@@ -64,13 +64,20 @@ class IngestService:
         *,
         log_cb: Optional[Callable[[str], None]] = None,
         is_cancelled: Optional[Callable[[], bool]] = None,
+        force: bool = False,
+        days_override: Optional[int] = None,
     ) -> int:
-        """跑单个源，返回本次新增内容数"""
+        """跑单个源，返回本次新增内容数。
+
+        days_override 非空时覆盖 config 的 days（作者主页"刷新回看 N 天"用）。
+        force 目前只影响日志语义（单源采集本来就强制跑，skip 在 run_group 层）。
+        """
         adapter = get_adapter(source.platform)
         if not adapter:
             raise RuntimeError(f"unsupported platform: {source.platform}")
 
         config = config_service.effective_for_source(source.id)
+        days = days_override if days_override is not None else config.get("days")
         storage = StorageManager(source.directory)
 
         # 1. 获取内容列表（博主/关键词）
@@ -80,7 +87,7 @@ class IngestService:
             contents = adapter.fetch_creator_content(
                 source.identifier,
                 limit=config.get("content_limit", 50),
-                days=config.get("days"),
+                days=days,
             )
         elif source.type == "keyword":
             if not adapter.has(Capability.SEARCH):
@@ -88,7 +95,7 @@ class IngestService:
             contents = adapter.search(
                 source.identifier,
                 limit=config.get("content_limit", 50),
-                days=config.get("days"),
+                days=days,
             )
         else:
             raise RuntimeError(f"未知源类型: {source.type}")

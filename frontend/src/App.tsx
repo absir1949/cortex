@@ -45,8 +45,8 @@ export default function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/groups/:id" element={<GroupLayout />}>
             <Route index element={<GroupDetail />} />
-            <Route path="creators/:sid" element={<CreatorDetail />} />
           </Route>
+          <Route path="/groups/:id/creators/:sid" element={<CreatorDetail />} />
           <Route path="/groups/:id/research" element={<ResearchForm />} />
           <Route path="/tasks" element={<TasksList />} />
           <Route path="/tasks/:id" element={<TaskProgress />} />

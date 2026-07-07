@@ -130,7 +130,7 @@ export default function GroupLayout() {
   }
 
   const onRunSource = async (sid: number) => {
-    await runSrc.mutateAsync(sid)
+    await runSrc.mutateAsync({ sourceId: sid })
     setNotice('已经开始刷新这个关注源。')
   }
 

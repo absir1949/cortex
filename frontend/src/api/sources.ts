@@ -45,10 +45,10 @@ export const useSourceDetail = (groupId: number | null | undefined, sourceId: nu
     enabled: !!groupId && !!sourceId,
   })
 
-export const useSourceContents = (groupId: number | null | undefined, sourceId: number | null | undefined, limit = 50) =>
+export const useSourceContents = (groupId: number | null | undefined, sourceId: number | null | undefined, limit = 20, offset = 0) =>
   useQuery({
-    queryKey: ['source-contents', groupId, sourceId, limit],
-    queryFn: () => api.get<{ items: SourceContent[]; total: number }>(`/groups/${groupId}/sources/${sourceId}/contents?limit=${limit}`),
+    queryKey: ['source-contents', groupId, sourceId, limit, offset],
+    queryFn: () => api.get<{ items: SourceContent[]; total: number }>(`/groups/${groupId}/sources/${sourceId}/contents?limit=${limit}&offset=${offset}`),
     enabled: !!groupId && !!sourceId,
   })
 

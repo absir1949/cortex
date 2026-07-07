@@ -86,8 +86,12 @@ export const useUpdateSource = (groupId: number) => {
 
 export const useRunSource = (groupId: number) =>
   useMutation({
-    mutationFn: (sourceId: number) =>
-      api.post<{ task_id: string }>(`/groups/${groupId}/sources/${sourceId}/run`),
+    mutationFn: (args: { sourceId: number; force?: boolean; days?: number }) => {
+      const qs = new URLSearchParams()
+      qs.set('force', String(args.force ?? true))
+      if (args.days) qs.set('days', String(args.days))
+      return api.post<{ task_id: string }>(`/groups/${groupId}/sources/${args.sourceId}/run?${qs.toString()}`)
+    },
   })
 
 export const useRunGroup = (groupId: number) =>

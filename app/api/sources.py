@@ -1,5 +1,5 @@
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.api.schemas import SourceCreateReq, SourceUpdateReq, SourceBrief
 from app.services.source_service import SourceService
@@ -66,15 +66,21 @@ def delete_source(group_id: int, source_id: int):
 
 
 @router.post("/{source_id}/run", status_code=202)
-def run_source(group_id: int, source_id: int):
-    """手动触发单个源采集 - 返回 task_id"""
+def run_source(
+    group_id: int,
+    source_id: int,
+    force: bool = Query(True),
+    days: int = Query(7, ge=1, le=365),
+):
+    """手动触发单个源采集。force=True 忽略 interval，days 控制回看天数。"""
     svc = SourceService()
     src = svc.get(source_id)
     if not src or src.group_id != group_id:
         raise HTTPException(404, "source not found")
     task_id = get_runner().enqueue(
         TaskKind.INGEST,
-        params={"source_id": source_id, "analyze": False, "group_id": group_id},
+        params={"source_id": source_id, "analyze": False, "group_id": group_id,
+                "force": force, "days": days},
         group_id=group_id,
         source_id=source_id,
     )
