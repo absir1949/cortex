@@ -21,6 +21,15 @@ class StorageManager:
     def exists(self, content_id: str) -> bool:
         return len(list(self.base.glob(f"*_{content_id}.*"))) > 0 or (self.base / f"{content_id}.mp4").exists()
 
+    def get_video_path(self, content_id: str) -> Optional[Path]:
+        for f in self.base.glob(f"*_{content_id}.mp4"):
+            return f
+        fallback = self.base / f"{content_id}.mp4"
+        return fallback if fallback.exists() else None
+
+    def has_video(self, content_id: str) -> bool:
+        return self.get_video_path(content_id) is not None
+
     def has_transcript(self, content_id: str) -> bool:
         return len(list(self.base.glob(f"*_{content_id}.txt"))) > 0 or (self.base / f"{content_id}.txt").exists()
 

@@ -42,6 +42,7 @@ class SignalService:
         transcript: str,
         comments: Optional[list[dict]] = None,
         create_time: Optional[str] = None,
+        raise_on_failure: bool = False,
     ) -> Optional[dict]:
         """判定一条内容的观点新旧。
 
@@ -68,11 +69,16 @@ class SignalService:
                 ],
                 config=config_service.get_llm_config(),
             )
-        except Exception:
+        except Exception as e:
+            if raise_on_failure:
+                raise RuntimeError(f"LLM 观点判定调用失败: {e}") from e
             return None
 
         parsed = self._parse_json(raw)
         if not parsed:
+            if raise_on_failure:
+                preview = (raw or "")[:300].replace("\n", " ")
+                raise RuntimeError(f"LLM 观点判定 JSON 解析失败: {preview}")
             return None
 
         # 规范化字段
@@ -87,11 +93,14 @@ class SignalService:
             is_new = False
 
         # 新观点才更新档案（避免档案被重复内容撑大）
+        profile_error = ""
+        profile_updated = False
         if is_new and new_points:
             try:
                 self.profiles.update(source, new_points, summary, date=create_time)
-            except Exception:
-                pass
+                profile_updated = True
+            except Exception as e:
+                profile_error = str(e)
 
         # 落 Signal 表
         with get_session() as s:
@@ -110,6 +119,8 @@ class SignalService:
             "summary": summary,
             "matched_points": matched,
             "new_points": new_points,
+            "profile_updated": profile_updated,
+            "profile_error": profile_error,
         }
 
     # ------ helpers ------

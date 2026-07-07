@@ -34,14 +34,19 @@ def handle_ingest(task: Task, ctx: TaskContext) -> dict:
         force = bool(params.get("force", True))
         days_override = params.get("days")
         ctx.log(f"开始采集源: {src.display_name}" + (f"（回看 {days_override} 天）" if days_override else ""))
-        n = svc.run_source(
+        result = svc.refresh_source(
             src,
             log_cb=lambda m: ctx.log(m),
             is_cancelled=ctx.is_cancelled,
             force=force,
             days_override=days_override,
+            task_id=ctx.task_id,
         )
-        return {"new_contents": n, "source_id": source_id}
+        return {
+            "new_contents": result["counts"].get("new_contents", 0),
+            "source_id": source_id,
+            "refresh": result,
+        }
 
     if not group_id:
         raise ValueError("group_id or source_id required")
@@ -53,6 +58,7 @@ def handle_ingest(task: Task, ctx: TaskContext) -> dict:
         progress_cb=ctx.progress,
         log_cb=lambda m: ctx.log(m),
         is_cancelled=ctx.is_cancelled,
+        task_id=ctx.task_id,
     )
 
     # 分析
@@ -60,7 +66,7 @@ def handle_ingest(task: Task, ctx: TaskContext) -> dict:
         ctx.log("开始知识提炼...")
         ctx.progress({"stage": "analyzing"})
         try:
-            knowledge_result = KnowledgeService().analyze_group(group_id)
+            knowledge_result = KnowledgeService().analyze_group(group_id, refresh_summary=result)
             if knowledge_result and knowledge_result.get("report_id"):
                 result["report_id"] = knowledge_result["report_id"]
                 result["report_path"] = knowledge_result["report_path"]

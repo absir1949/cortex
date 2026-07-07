@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 from datetime import datetime
+from pathlib import Path
+import time
 from typing import Any, Optional
 
 import requests
@@ -19,6 +21,10 @@ import requests
 from app.settings import settings
 from app.models.content import Content, Comment, ContentType
 from app.platforms.base import PlatformAdapter, Capability
+
+
+class WechatChannelsDownloadError(RuntimeError):
+    """Raised when a video号 media download/decrypt step fails."""
 
 
 class WechatChannelsAdapter(PlatformAdapter):
@@ -234,6 +240,7 @@ class WechatChannelsAdapter(PlatformAdapter):
         # 实时拿新鲜的 URL + decode_key（旧的可能已过期）
         full_url = ""
         decode_key = ""
+        detail_error = None
         try:
             detail = self._post(
                 "/api/v1/wechat_channels/v2/fetch_video_detail",
@@ -242,28 +249,36 @@ class WechatChannelsAdapter(PlatformAdapter):
             media = (detail.get("data") or {}).get("media") or {}
             full_url = media.get("full_url") or ""
             decode_key = str(media.get("decode_key") or "")
-        except Exception:
+        except Exception as e:
+            detail_error = e
             # 实时获取失败，回退到缓存的 URL（可能过期但值得一试）
             if content.media_urls:
                 full_url = content.media_urls[0]
                 decode_key = str(content.statistics.get("_decode_key") or "")
         if not full_url or not decode_key:
-            return False
+            msg = "缺少视频 CDN URL 或 decode_key"
+            if detail_error:
+                msg += f"（实时详情获取失败: {detail_error}）"
+            raise WechatChannelsDownloadError(msg)
 
         # 1. 下载加密视频（带重试，CDN 偶尔限流）
         encrypted = None
+        last_download_error = ""
         for attempt in range(3):
             try:
-                resp = requests.get(full_url, timeout=120)
+                resp = requests.get(full_url, timeout=(10, 90))
                 if resp.status_code == 200 and len(resp.content) > 10000:
                     encrypted = resp.content
                     break
-            except Exception:
-                pass
-            import time
+                if resp.status_code != 200:
+                    last_download_error = f"CDN HTTP {resp.status_code}"
+                else:
+                    last_download_error = f"CDN 返回内容过小: {len(resp.content)} bytes"
+            except requests.RequestException as e:
+                last_download_error = f"CDN 请求失败: {e}"
             time.sleep(2)
         if not encrypted:
-            return False
+            raise WechatChannelsDownloadError(f"下载加密视频失败: {last_download_error or '未知错误'}")
 
         # 2. 调解密服务
         decrypt_url = settings.wechat_decrypt_url.rstrip("/") + "/api/decrypt"
@@ -272,21 +287,26 @@ class WechatChannelsAdapter(PlatformAdapter):
                 decrypt_url,
                 files={"video": ("encrypted.mp4", encrypted, "video/mp4")},
                 data={"decode_key": decode_key},
-                timeout=120,
+                timeout=(10, 120),
             )
-            if resp2.status_code != 200:
-                return False
-            decrypted = resp2.content
-            # 验证是合法 MP4
-            if len(decrypted) < 8 or decrypted[4:8] != b"ftyp":
-                return False
-        except Exception:
-            return False
+        except requests.RequestException as e:
+            raise WechatChannelsDownloadError(f"解密服务请求失败 {decrypt_url}: {e}") from e
+
+        if resp2.status_code != 200:
+            body = resp2.text[:200] if resp2.text else ""
+            raise WechatChannelsDownloadError(f"解密服务 HTTP {resp2.status_code}: {body}")
+
+        decrypted = resp2.content
+        # 验证是合法 MP4
+        if len(decrypted) < 8 or decrypted[4:8] != b"ftyp":
+            prefix = decrypted[:16].hex()
+            raise WechatChannelsDownloadError(
+                f"解密结果不是合法 MP4: size={len(decrypted)}, prefix={prefix}"
+            )
 
         # 3. 保存解密后的 MP4
         try:
-            from pathlib import Path
             Path(output_path).write_bytes(decrypted)
             return True
-        except Exception:
-            return False
+        except OSError as e:
+            raise WechatChannelsDownloadError(f"保存解密视频失败: {e}") from e

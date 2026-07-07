@@ -8,6 +8,8 @@
   settings           系统级 runtime 配置（key-value JSON）
   tasks              异步任务
   reports            产出报告元数据（正文在文件系统）
+  refresh_runs       一次作者/专题刷新的运行记录与阶段统计
+  content_items      每条内容的处理状态（水位、失败、补跑依据）
   analyzed_content   已分析过的 content_id（增量分析，替代 .analyzed.json）
   signals            每条内容的观点判定（新观点/老调重弹）+ 提炼的新观点
   prompt_history     prompt 修改历史（保留版本）
@@ -162,6 +164,79 @@ class Report(SQLModel, table=True):
     sources_used: list = Field(default_factory=list, sa_column=Column(JSON))
 
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+# ---------- 刷新运行记录 ----------
+
+class RefreshRun(SQLModel, table=True):
+    """一次刷新动作的运行水位。
+
+    scope=source 表示单作者刷新；scope=group 表示专题刷新。
+    专题刷新下会创建一个 group run，并为每个 source 创建子 run。
+    """
+    __tablename__ = "refresh_runs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    scope: str = Field(index=True)                  # group / source
+    mode: str = Field(default="refresh", index=True)  # refresh / repair / rebuild_report
+    status: str = Field(default="running", index=True)  # running / succeeded / partial_failed / failed / canceled
+
+    parent_run_id: Optional[int] = Field(default=None, index=True)
+    task_id: Optional[str] = Field(default=None, foreign_key="tasks.id", index=True)
+    group_id: Optional[int] = Field(default=None, foreign_key="knowledge_groups.id", index=True)
+    source_id: Optional[int] = Field(default=None, foreign_key="sources.id", index=True)
+    lookback_days: Optional[int] = None
+
+    counts: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    errors: list = Field(default_factory=list, sa_column=Column(JSON))
+
+    started_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    finished_at: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+# ---------- 内容处理状态 ----------
+
+class ContentItem(SQLModel, table=True):
+    """订阅源下某条内容的处理状态。
+
+    文件是否存在只是证据之一；真正的刷新逻辑以这些阶段状态为准。
+    """
+    __tablename__ = "content_items"
+    __table_args__ = (UniqueConstraint("source_id", "content_id", name="uq_content_item"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    group_id: Optional[int] = Field(default=None, foreign_key="knowledge_groups.id", index=True)
+    source_id: int = Field(foreign_key="sources.id", index=True)
+    creator_id: Optional[int] = Field(default=None, foreign_key="creators.id", index=True)
+
+    platform: str = Field(index=True)
+    content_id: str = Field(index=True)
+    content_type: str = ""
+    title: str = ""
+    author_id: str = ""
+    author_name: str = ""
+    url: str = ""
+    create_time: str = Field(default="", index=True)
+
+    first_seen_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    last_seen_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+    media_status: str = Field(default="pending", index=True)
+    transcript_status: str = Field(default="pending", index=True)
+    comments_status: str = Field(default="pending", index=True)
+    signal_status: str = Field(default="pending", index=True)
+    profile_status: str = Field(default="pending", index=True)
+
+    media_error: Optional[str] = None
+    transcript_error: Optional[str] = None
+    comments_error: Optional[str] = None
+    signal_error: Optional[str] = None
+    profile_error: Optional[str] = None
+
+    file_size: int = 0
+    statistics: dict = Field(default_factory=dict, sa_column=Column(JSON))
 
 
 # ---------- 增量分析追踪 ----------

@@ -28,7 +28,7 @@ class KnowledgeService:
 
     # ============ 公开 API ============
 
-    def analyze_group(self, group_id: int) -> Optional[dict]:
+    def analyze_group(self, group_id: int, refresh_summary: Optional[dict] = None) -> Optional[dict]:
         """对一个组做一次增量分析，返回结构：
         {
           "creators": [{"name", "analysis", "new_count"}],
@@ -50,11 +50,10 @@ class KnowledgeService:
             if not new_items:
                 continue
 
-            # 三态分组：
-            #   signal_items  = 新观点（is_new=True）+ 未判定（采集时 LLM 失败，兜底深度分析）
-            #   repeat_items  = 确认过的老调重弹（has_signal=True 且 is_new=False），只汇总不深度分析
-            signal_items = [it for it in new_items if it.get("is_new_signal") or not it.get("has_signal", True)]
-            repeat_items = [it for it in new_items if it.get("has_signal") and not it.get("is_new_signal")]
+            # 报告只消费已完成 Signal 的内容。未判定内容留在 content_items
+            # 由刷新流水线补跑，避免报告、信号列表、观点档案不一致。
+            signal_items = [it for it in new_items if it.get("is_new_signal")]
+            repeat_items = [it for it in new_items if not it.get("is_new_signal")]
 
             if signal_items:
                 analysis = self._analyze_source(source, signal_items)
@@ -100,7 +99,12 @@ class KnowledgeService:
             insights = None
 
         # 落地报告
-        report_md, report_json_path = self._write_report(group.slug, analyzed_results, insights)
+        report_md, report_json_path = self._write_report(
+            group.slug,
+            analyzed_results,
+            insights,
+            refresh_summary=refresh_summary,
+        )
         with get_session() as s:
             report = ReportRepo(s).create(Report(
                 group_id=group_id,
@@ -142,7 +146,7 @@ class KnowledgeService:
     # ============ 内部 ============
 
     def _collect_new_items(self, source) -> list[dict]:
-        """从该源目录读已转录的 content，过滤掉已分析的，并附加观点信号"""
+        """从该源目录读已转录且已完成 Signal 的 content，过滤掉已分析项。"""
         with get_session() as s:
             analyzed = AnalyzedRepo(s).get_analyzed_ids(source.id)
             # 查 Signal 表：哪些 content 带新观点
@@ -159,18 +163,19 @@ class KnowledgeService:
             if not transcript:
                 continue
             sig = sig_map.get(cid)
+            if sig is None:
+                continue
             new_items.append({
                 "content_id": cid,
                 "title": md.get("title", ""),
                 "transcript": transcript,
                 "comments": storage.get_comments(cid) or [],
                 "create_time": md.get("create_time", ""),
-                # 观点信号（采集时由 SignalService 写入，可能为 None）
-                # 三态区分：has_signal=False 表示采集时判定失败（LLM 异常），不应当作老调重弹
-                "has_signal": sig is not None,
-                "is_new_signal": bool(sig and sig.is_new),
-                "signal_summary": sig.summary if sig else "",
-                "signal_new_points": list(sig.new_points) if sig else [],
+                "has_signal": True,
+                "is_new_signal": bool(sig.is_new),
+                "signal_summary": sig.summary,
+                "signal_new_points": list(sig.new_points),
+                "signal_matched_points": list(sig.matched_points),
             })
         return new_items
 
@@ -251,7 +256,7 @@ class KnowledgeService:
         titles = "、".join((it.get("title", "") or "无标题")[:15] for it in items[:5])
         points = []
         for it in items:
-            for p in (it.get("signal_new_points") or []):
+            for p in (it.get("signal_matched_points") or it.get("signal_new_points") or []):
                 if p not in points:
                     points.append(p)
             if len(points) >= 5:
@@ -319,7 +324,13 @@ class KnowledgeService:
             parts.append(header + "\n" + "\n".join(body))
         return "\n\n---\n\n".join(parts)
 
-    def _write_report(self, group_slug: str, results: list[dict], insights: Optional[dict] = None) -> tuple[Path, Path]:
+    def _write_report(
+        self,
+        group_slug: str,
+        results: list[dict],
+        insights: Optional[dict] = None,
+        refresh_summary: Optional[dict] = None,
+    ) -> tuple[Path, Path]:
         dir_ = paths.knowledge_dir_for_group(group_slug)
         dir_.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -336,6 +347,10 @@ class KnowledgeService:
             f"**本期新信号**：{total_new_signals} 条新观点 · {total_repeats} 条内容与既有观点重复（已折叠）",
             "",
         ]
+        refresh_lines = self._format_refresh_summary(refresh_summary)
+        if refresh_lines:
+            lines.extend(refresh_lines)
+            lines.append("")
 
         # 跨博主行业信号段（有趋势时才出现，放最前）
         trend_lines = self._format_insights(insights)
@@ -366,6 +381,7 @@ class KnowledgeService:
             json.dumps({
                 "creators": results,
                 "insights": insights,
+                "refresh": refresh_summary,
                 "stats": {
                     "new_signals": total_new_signals,
                     "repeats": total_repeats,
@@ -374,6 +390,31 @@ class KnowledgeService:
             encoding="utf-8",
         )
         return md_path, json_path
+
+    @staticmethod
+    def _format_refresh_summary(refresh_summary: Optional[dict]) -> list[str]:
+        if not refresh_summary:
+            return []
+        details = refresh_summary.get("details") or []
+        problem_details = [
+            d for d in details
+            if d.get("status") not in ("succeeded", "skipped")
+        ]
+        if not problem_details:
+            return []
+        lines = [
+            "## 本次刷新状态",
+            "",
+            "> 部分来源未完整纳入本次报告；未完成的下载、转录或观点判定会在后续刷新中继续补跑。",
+            "",
+        ]
+        for d in problem_details[:8]:
+            name = d.get("source") or d.get("source_id") or "未知来源"
+            status = d.get("status") or "unknown"
+            errors = d.get("errors") or []
+            first = errors[0].get("message") if errors and isinstance(errors[0], dict) else d.get("error", "")
+            lines.append(f"- {name}: {status}" + (f"（{first[:80]}）" if first else ""))
+        return lines
 
     @staticmethod
     def _format_insights(insights: Optional[dict]) -> list[str]:

@@ -249,10 +249,10 @@ def test_system_int_handles_invalid_config():
     config_service.invalidate_cache()
 
 
-# ---------- 修复点验证：三态分组（未判定 ≠ 老调重弹）----------
+# ---------- 修复点验证：报告只消费已完成 Signal ----------
 
 def test_collect_new_items_distinguishes_unjudged_from_repeat(monkeypatch):
-    """没有 signal 记录的内容（判定失败）应标 has_signal=False，不当作老调重弹"""
+    """没有 signal 记录的内容不进入报告，避免绕过观点档案状态机"""
     from app.services.knowledge_service import KnowledgeService
     from app.storage.fs import StorageManager
 
@@ -277,16 +277,15 @@ def test_collect_new_items_distinguishes_unjudged_from_repeat(monkeypatch):
     items = KnowledgeService()._collect_new_items(src)
     item_map = {it["content_id"]: it for it in items}
 
-    # 未判定的内容：has_signal=False
-    assert item_map["c-unjudged"]["has_signal"] is False
-    assert item_map["c-unjudged"]["is_new_signal"] is False
+    # 未判定的内容：等待刷新流水线补判定，不进入报告
+    assert "c-unjudged" not in item_map
     # 真老调重弹：has_signal=True, is_new=False
     assert item_map["c-repeat"]["has_signal"] is True
     assert item_map["c-repeat"]["is_new_signal"] is False
 
 
-def test_analyze_group_undjudged_goes_to_deep_analysis(monkeypatch):
-    """未判定内容应进深度分析（_analyze_source），不被误归为老调重弹"""
+def test_analyze_group_unjudged_does_not_go_to_deep_analysis(monkeypatch):
+    """未判定内容不应被报告兜底深度分析；应等待刷新流水线补 Signal"""
     from app.services.knowledge_service import KnowledgeService
     from app.storage.fs import StorageManager
 
@@ -298,7 +297,7 @@ def test_analyze_group_undjudged_goes_to_deep_analysis(monkeypatch):
         "content_id": "c1", "title": "未判定", "create_time": "2026-07-01T10:00:00",
     })
 
-    # mock _analyze_source 被调用、_summarize_repeats 不该被调用
+    # mock _analyze_source / _summarize_repeats 都不应被调用
     analyze_called = {"v": False}
     summarize_called = {"v": False}
     orig_analyze = KnowledgeService._analyze_source
@@ -323,8 +322,9 @@ def test_analyze_group_undjudged_goes_to_deep_analysis(monkeypatch):
     monkeypatch.setattr("app.db.repos.ReportRepo.create", lambda self, r: type("R", (), {"id": 1})())
 
     result = KnowledgeService().analyze_group(grp)
-    assert analyze_called["v"] is True   # 未判定 → 深度分析
-    assert summarize_called["v"] is False  # 不该被当老调重弹
+    assert result["report_id"] is None
+    assert analyze_called["v"] is False
+    assert summarize_called["v"] is False
 
 
 # ---------- 修复点验证：insights 端点读配置默认 days ----------

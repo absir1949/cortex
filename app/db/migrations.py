@@ -122,6 +122,14 @@ def _mig_004_creators(session: Session) -> None:
             old_path.rename(new_path)
 
 
+# ============ Migration 005: 刷新状态机 ============
+
+@register(5, "005_refresh_state: 内容处理状态 + 刷新运行记录")
+def _mig_005_refresh_state(session: Session) -> None:
+    # create_all 幂等：只创建 refresh_runs / content_items 等新增表。
+    SQLModel.metadata.create_all(get_engine())
+
+
 # ============ 通用运行器 ============
 
 def current_version(session: Session) -> int:
