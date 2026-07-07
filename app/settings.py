@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     bee_url: str = ""
     bee_notify_group: str = ""
 
+    # 视频号解密服务（Docker 部署的 WeChat-Channels-Video-File-Decryption）
+    wechat_decrypt_url: str = "http://192.168.2.122:3000"
+
     # LLM secrets（runtime 参数走 DB）
     # 若 DB 里没配置，回退到这里的环境变量
     llm_api_key: str = ""

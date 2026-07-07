@@ -37,6 +37,7 @@ class WechatChannelsAdapter(PlatformAdapter):
             Capability.RESOLVE_IDENTIFIER,
             Capability.FETCH_CREATOR,
             Capability.FETCH_COMMENTS,
+            Capability.DOWNLOAD_MEDIA,
         }
 
     # ------ 内部工具 ------
@@ -71,6 +72,18 @@ class WechatChannelsAdapter(PlatformAdapter):
         object_id = str(item.get("id") or "")
         title = item.get("title") or ""
         nick = item.get("nickname") or author_name
+        media = item.get("media") or {}
+        full_url = media.get("full_url") or ""
+        decode_key = str(media.get("decode_key") or "")
+        stats = {
+            "like_count": int(item.get("like_count") or 0),
+            "comment_count": int(item.get("comment_count") or 0),
+            "forward_count": int(item.get("forward_count") or 0),
+            "fav_count": int(item.get("fav_count") or 0),
+            "read_count": int(item.get("read_count") or 0),
+        }
+        if decode_key:
+            stats["_decode_key"] = decode_key
         return Content(
             content_id=object_id,
             platform=self.platform,
@@ -80,16 +93,9 @@ class WechatChannelsAdapter(PlatformAdapter):
             author_name=nick,
             title=title,
             text=title,
-            media_urls=[],
+            media_urls=[full_url] if full_url else [],
             create_time=self._iso(item.get("create_time")),
-            statistics={
-                "like_count": int(item.get("like_count") or 0),
-                "comment_count": int(item.get("comment_count") or 0),
-                "forward_count": int(item.get("forward_count") or 0),
-                "fav_count": int(item.get("fav_count") or 0),
-                "read_count": int(item.get("read_count") or 0),
-            },
-            needs_transcribe=False,
+            statistics=stats,
         )
 
     # ------ 解析用户输入 → finder username ------
@@ -216,3 +222,52 @@ class WechatChannelsAdapter(PlatformAdapter):
                 create_time=self._iso(item.get("create_time")),
             ))
         return comments
+
+    # ------ 下载（加密视频 → 调解密服务 → 保存 MP4）------
+
+    def download_media(self, content: Content, output_path: str) -> bool:
+        """下载视频号加密视频，调解密服务转成明文 MP4。
+
+        decode_key 必须和 full_url 来自同一次 API 响应（每次请求都变）。
+        """
+        if not content.media_urls:
+            return False
+        full_url = content.media_urls[0]
+        decode_key = str(content.statistics.get("_decode_key") or "")
+        if not decode_key:
+            return False
+
+        # 1. 下载加密视频
+        try:
+            resp = requests.get(full_url, timeout=120, stream=True)
+            if resp.status_code != 200:
+                return False
+            encrypted = resp.content
+        except Exception:
+            return False
+
+        # 2. 调解密服务
+        decrypt_url = settings.wechat_decrypt_url.rstrip("/") + "/api/decrypt"
+        try:
+            resp2 = requests.post(
+                decrypt_url,
+                files={"video": ("encrypted.mp4", encrypted, "video/mp4")},
+                data={"decode_key": decode_key},
+                timeout=120,
+            )
+            if resp2.status_code != 200:
+                return False
+            decrypted = resp2.content
+            # 验证是合法 MP4
+            if len(decrypted) < 8 or decrypted[4:8] != b"ftyp":
+                return False
+        except Exception:
+            return False
+
+        # 3. 保存解密后的 MP4
+        try:
+            from pathlib import Path
+            Path(output_path).write_bytes(decrypted)
+            return True
+        except Exception:
+            return False
