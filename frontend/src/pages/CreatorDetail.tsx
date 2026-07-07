@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { useSourceDetail, useSourceContents, useSourceProfile } from '../api/sources'
-import TranscriptCard from '../components/TranscriptCard'
+import TranscriptToggle from '../components/TranscriptCard'
 
 function formatTime(value?: string | null) {
   if (!value) return ''
@@ -121,7 +121,7 @@ export default function CreatorDetail() {
                   {c.transcribed && (
                     <>
                       <span>·</span>
-                      <TranscriptCard contentId={c.content_id} />
+                      <TranscriptToggle contentId={c.content_id} />
                     </>
                   )}
                 </div>

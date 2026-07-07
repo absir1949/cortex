@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
 
-/** 按 content_id 拿转录原文（hover 时触发，按 content_id 缓存）*/
+/** 按 content_id 拿转录原文（点击「查看原文」时触发，按 content_id 永久缓存）*/
 export const useTranscript = (contentId: string | null | undefined, enabled = false) =>
   useQuery({
     queryKey: ['transcript', contentId],

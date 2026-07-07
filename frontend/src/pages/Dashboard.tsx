@@ -1,30 +1,18 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { useGroups, useCreateGroup } from '../api/groups'
 import { useRecentNewSignals } from '../api/signals'
 import SignalItem from '../components/SignalItem'
-
-function formatTime(value?: string | null) {
-  if (!value) return ''
-  return value.slice(0, 16).replace('T', ' ')
-}
-
-function reportLead(title?: string) {
-  if (!title) return '还没有简报'
-  return title.replace(/^研究：/, '')
-}
 
 /** 首页 = 全局时间流。所有知识库的新观点混合按时间倒序，扫一眼掌握全行业。 */
 export default function Dashboard() {
   const { data: groups = [], isLoading } = useGroups()
   const { data: newSignals = [] } = useRecentNewSignals(30)
   const createGroup = useCreateGroup()
+  const navigate = useNavigate()
 
   const [showCreate, setShowCreate] = useState(false)
   const [name, setName] = useState('')
-
-  const latestSignal = newSignals[0]
-  const isEmpty = !isLoading && newSignals.length === 0 && groups.length === 0
 
   return (
     <div className="home-page">
@@ -33,7 +21,6 @@ export default function Dashboard() {
         <div className="feed-header">
           <span className="soft-label">NEW SIGNALS</span>
           <h1>今天的新观点</h1>
-          <p>所有专题里判断为「新观点」的内容，按时间倒序。hover 摘要看原文，重复的已自动过滤。</p>
         </div>
 
         {newSignals.length === 0 ? (
@@ -79,7 +66,7 @@ export default function Dashboard() {
             })
             setName('')
             setShowCreate(false)
-            window.location.href = `/groups/${g.id}`
+            navigate(`/groups/${g.id}`)
           }}
         >
           <input

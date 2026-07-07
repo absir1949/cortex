@@ -6,14 +6,14 @@ interface Props {
 }
 
 /** 「查看原文」入口：点击展开/收起转录原文。
- * 用在信号卡片和内容列表的「看原视频」旁边。
+ * 单根 div 避免 fragment 平铺进 flex 容器导致布局错乱。
  */
 export default function TranscriptToggle({ contentId }: Props) {
   const [open, setOpen] = useState(false)
   const { data: transcript, isLoading, isError } = useTranscript(contentId, open)
 
   return (
-    <>
+    <div className="transcript-wrap">
       <button
         type="button"
         className="transcript-toggle-btn"
@@ -28,6 +28,6 @@ export default function TranscriptToggle({ contentId }: Props) {
           {transcript && <div className="transcript-block-body">{transcript}</div>}
         </div>
       )}
-    </>
+    </div>
   )
 }

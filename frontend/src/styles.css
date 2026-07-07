@@ -383,6 +383,9 @@ button:disabled {
 }
 
 /* ===== 转录原文「查看原文」点击展开 ===== */
+.transcript-wrap {
+  flex-basis: 100%;
+}
 .transcript-toggle-btn {
   background: none;
   border: none;

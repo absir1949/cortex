@@ -27,15 +27,15 @@ def _to_brief(sig) -> dict:
 
 def _enrich_with_content(signals: list, sources: dict) -> list:
     """给信号列表附加 source_name/platform/url/title/group_name"""
-    # 批量查 group_name（知识库名），供首页全局流显示来源
+    # 批量查 group_name（一次 IN 查询，避免 N+1）
     group_ids = {src.group_id for src in sources.values() if src.group_id}
     group_names: dict[int, str] = {}
     if group_ids:
         with get_session() as s:
-            for gid in group_ids:
-                g = GroupRepo(s).get(gid)
-                if g:
-                    group_names[gid] = g.name
+            from sqlmodel import select
+            from app.db.schema import KnowledgeGroup
+            rows = s.exec(select(KnowledgeGroup).where(KnowledgeGroup.id.in_(group_ids))).all()
+            group_names = {r.id: r.name for r in rows}
 
     storage_cache: dict[int, StorageManager] = {}
     out = []
