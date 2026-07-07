@@ -445,8 +445,9 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 4px 8px;
+  padding: 0 24px;
   font-size: 0.875rem;
+  color: #66756d;
 }
 .breadcrumb-sep {
   color: #66756d;
@@ -565,6 +566,13 @@ button:disabled {
   text-decoration: none;
 }
 .signal-meta a:hover {
+  text-decoration: underline;
+}
+.signal-meta-link {
+  color: #149b68 !important;
+  text-decoration: none;
+}
+.signal-meta-link:hover {
   text-decoration: underline;
 }
 .signal-meta .accent {

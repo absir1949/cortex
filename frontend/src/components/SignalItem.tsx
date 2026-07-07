@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import type { Signal } from '../api/types'
 import TranscriptToggle from './TranscriptCard'
 
@@ -12,10 +13,12 @@ interface Props {
   showGroupName?: boolean
 }
 
-/** 信号卡片 - 在 Dashboard 和 GroupDetail 复用 */
 export default function SignalItem({ signal, showVideoLink = true, showGroupName = false }: Props) {
   const isRepeat = !signal.is_new
   const points = signal.is_new ? signal.new_points : signal.matched_points
+  const creatorPath = signal.group_id && signal.source_id
+    ? `/groups/${signal.group_id}/creators/${signal.source_id}`
+    : null
 
   return (
     <article className={`signal-item${isRepeat ? ' is-repeat' : ''}`}>
@@ -31,11 +34,15 @@ export default function SignalItem({ signal, showVideoLink = true, showGroupName
         </ul>
       )}
       <div className="signal-meta">
-        <span>{signal.source_name || '博主'}</span>
-        {showGroupName && signal.group_name && (
+        {creatorPath ? (
+          <Link to={creatorPath} className="signal-meta-link">{signal.source_name || '博主'}</Link>
+        ) : (
+          <span>{signal.source_name || '博主'}</span>
+        )}
+        {showGroupName && signal.group_name && signal.group_id && (
           <>
             <span>·</span>
-            <span>{signal.group_name}</span>
+            <Link to={`/groups/${signal.group_id}`} className="signal-meta-link">{signal.group_name}</Link>
           </>
         )}
         <span>·</span>

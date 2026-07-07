@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import { useSourceDetail, useSourceContents, useSourceProfile } from '../api/sources'
 import type { SourceContent } from '../api/sources'
-import { useRunSource } from '../api/groups'
+import { useRunSource, useGroup } from '../api/groups'
 import { useTask } from '../api/tasks'
 import TranscriptToggle from '../components/TranscriptCard'
 
@@ -26,6 +26,7 @@ export default function CreatorDetail() {
   const gid = Number(id)
   const sourceId = Number(sid)
   const { data: detail, isLoading } = useSourceDetail(gid, sourceId)
+  const { data: group } = useGroup(gid)
   const { data: profile = '' } = useSourceProfile(gid, sourceId)
   const [showProfile, setShowProfile] = useState(true)
   const [refreshDays, setRefreshDays] = useState(7)
@@ -90,7 +91,7 @@ export default function CreatorDetail() {
       <div className="breadcrumb-bar">
         <Link to="/" className="back-link">今日</Link>
         <span className="breadcrumb-sep">›</span>
-        <Link to={`/groups/${gid}`} className="breadcrumb-group">返回专题</Link>
+        <Link to={`/groups/${gid}`} className="breadcrumb-group">{group?.name || '专题'}</Link>
       </div>
 
       <section className="reader-block lead-block">
