@@ -1,6 +1,6 @@
-"""微信视频号平台适配器 - 基于 TikHub WeChat-Channels-V2-API
+"""微信视频号平台适配器 - 基于 TikHub WeChat Channels V2 API
 
-端点（都是 POST /api/v1/wechat-channels-v2-api/...）：
+端点（都是 POST /api/v1/wechat_channels/v2/...）：
 - fetch_channel_id_to_username   sph 短号 → finder username
 - fetch_channel_info              账号信息
 - fetch_user_videos               用户作品列表
@@ -98,12 +98,14 @@ class WechatChannelsAdapter(PlatformAdapter):
         # 尝试当作 channel_id（sph 短号或其他 ID）转换
         try:
             data = self._post(
-                "/api/v1/wechat-channels-v2-api/fetch_channel_id_to_username",
-                {"channel_id": raw},
+                "/api/v1/wechat_channels/v2/fetch_channel_id_to_username",
+                {"channel_id": raw, "raw": False},
             )
-            username = (data.get("data") or {}).get("username") or ""
+            d = data.get("data") or {}
+            username = d.get("username") or ""
+            nickname = d.get("nickname") or ""
             if username:
-                return username, display_name or raw
+                return username, display_name or nickname or raw
         except Exception as e:
             raise ValueError(
                 f"视频号无法解析「{raw}」。视频号暂不支持搜名字，"
@@ -124,7 +126,7 @@ class WechatChannelsAdapter(PlatformAdapter):
         author_name = ""
         try:
             info = self._post(
-                "/api/v1/wechat-channels-v2-api/fetch_channel_info",
+                "/api/v1/wechat_channels/v2/fetch_channel_info",
                 {"username": creator_id},
             )
             nick = (info.get("data") or {}).get("nickname") or ""
@@ -138,7 +140,7 @@ class WechatChannelsAdapter(PlatformAdapter):
         for _ in range(5):
             try:
                 data = self._post(
-                    "/api/v1/wechat-channels-v2-api/fetch_user_videos",
+                    "/api/v1/wechat_channels/v2/fetch_user_videos",
                     {"username": creator_id, "cursor": cursor},
                 )
             except Exception:
@@ -184,7 +186,7 @@ class WechatChannelsAdapter(PlatformAdapter):
     ) -> list[Comment]:
         try:
             data = self._post(
-                "/api/v1/wechat-channels-v2-api/fetch_video_comments",
+                "/api/v1/wechat_channels/v2/fetch_video_comments",
                 {"object_id": content_id, "cursor": ""},
             )
         except Exception:
