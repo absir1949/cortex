@@ -228,13 +228,26 @@ class WechatChannelsAdapter(PlatformAdapter):
     def download_media(self, content: Content, output_path: str) -> bool:
         """下载视频号加密视频，调解密服务转成明文 MP4。
 
-        decode_key 必须和 full_url 来自同一次 API 响应（每次请求都变）。
+        视频号 CDN URL 有时效性（token 过期），这里实时调 fetch_video_detail
+        拿最新鲜的 URL + decode_key，而不是用采集开始时缓存的旧 URL。
         """
-        if not content.media_urls:
-            return False
-        full_url = content.media_urls[0]
-        decode_key = str(content.statistics.get("_decode_key") or "")
-        if not decode_key:
+        # 实时拿新鲜的 URL + decode_key（旧的可能已过期）
+        full_url = ""
+        decode_key = ""
+        try:
+            detail = self._post(
+                "/api/v1/wechat_channels/v2/fetch_video_detail",
+                {"username": content.author_id, "object_id": content.content_id, "raw": False},
+            )
+            media = (detail.get("data") or {}).get("media") or {}
+            full_url = media.get("full_url") or ""
+            decode_key = str(media.get("decode_key") or "")
+        except Exception:
+            # 实时获取失败，回退到缓存的 URL（可能过期但值得一试）
+            if content.media_urls:
+                full_url = content.media_urls[0]
+                decode_key = str(content.statistics.get("_decode_key") or "")
+        if not full_url or not decode_key:
             return False
 
         # 1. 下载加密视频（带重试，CDN 偶尔限流）
