@@ -23,7 +23,7 @@ export default function SignalItem({ signal, showVideoLink = true, showGroupName
   return (
     <article className={`signal-item${isRepeat ? ' is-repeat' : ''}`}>
       <div className="signal-item-head">
-        <span className="signal-item-badge">{signal.is_new ? '🆕' : '♻️'}</span>
+        <span className="signal-item-badge">{signal.is_new ? '新' : '复'}</span>
         <span className="signal-item-summary">{signal.summary || '（无摘要）'}</span>
       </div>
       {points.length > 0 && (
@@ -50,7 +50,7 @@ export default function SignalItem({ signal, showVideoLink = true, showGroupName
         {showVideoLink && signal.url && (
           <>
             <span>·</span>
-            <a href={signal.url} target="_blank" rel="noreferrer">看原视频 ↗</a>
+            <a href={signal.url} target="_blank" rel="noreferrer">原视频</a>
           </>
         )}
         <span>·</span>

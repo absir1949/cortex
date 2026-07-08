@@ -130,6 +130,13 @@ def _mig_005_refresh_state(session: Session) -> None:
     SQLModel.metadata.create_all(get_engine())
 
 
+# ============ Migration 006: 问听风对话 ============
+
+@register(6, "006_ask_conversations: 问听风对话与消息")
+def _mig_006_ask_conversations(session: Session) -> None:
+    SQLModel.metadata.create_all(get_engine())
+
+
 # ============ 通用运行器 ============
 
 def current_version(session: Session) -> int:

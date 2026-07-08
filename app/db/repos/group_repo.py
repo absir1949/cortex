@@ -1,9 +1,21 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
+from sqlalchemy import delete
 from sqlmodel import Session, select
 
-from app.db.schema import KnowledgeGroup, Source
+from app.db.schema import (
+    AnalyzedContent,
+    AskConversation,
+    AskMessage,
+    ContentItem,
+    KnowledgeGroup,
+    RefreshRun,
+    Report,
+    Signal,
+    Source,
+    Task,
+)
 
 
 class GroupRepo:
@@ -38,8 +50,30 @@ class GroupRepo:
             return
         if cascade:
             sources = self.session.exec(select(Source).where(Source.group_id == group_id)).all()
-            for s in sources:
-                self.session.delete(s)
+            source_ids = [s.id for s in sources if s.id is not None]
+            conversations = self.session.exec(
+                select(AskConversation.id).where(AskConversation.group_id == group_id)
+            ).all()
+            conversation_ids = [cid for cid in conversations if cid is not None]
+
+            if conversation_ids:
+                self.session.exec(delete(AskMessage).where(AskMessage.conversation_id.in_(conversation_ids)))
+            self.session.exec(delete(AskConversation).where(AskConversation.group_id == group_id))
+
+            self.session.exec(delete(Report).where(Report.group_id == group_id))
+            self.session.exec(delete(RefreshRun).where(RefreshRun.group_id == group_id))
+            self.session.exec(delete(Signal).where(Signal.group_id == group_id))
+            self.session.exec(delete(ContentItem).where(ContentItem.group_id == group_id))
+
+            if source_ids:
+                self.session.exec(delete(RefreshRun).where(RefreshRun.source_id.in_(source_ids)))
+                self.session.exec(delete(Signal).where(Signal.source_id.in_(source_ids)))
+                self.session.exec(delete(ContentItem).where(ContentItem.source_id.in_(source_ids)))
+                self.session.exec(delete(AnalyzedContent).where(AnalyzedContent.source_id.in_(source_ids)))
+                self.session.exec(delete(Task).where(Task.source_id.in_(source_ids)))
+
+            self.session.exec(delete(Task).where(Task.group_id == group_id))
+            self.session.exec(delete(Source).where(Source.group_id == group_id))
         self.session.delete(group)
         self.session.commit()
 

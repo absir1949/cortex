@@ -35,6 +35,14 @@ class GroupResp(BaseModel):
     updated_at: str = ""
 
 
+class GroupSummaryResp(GroupResp):
+    recent_content_count: int = 0
+    recent_signal_count: int = 0
+    recent_new_signal_count: int = 0
+    failed_source_count: int = 0
+    window_days: int = 7
+
+
 class SourceBrief(BaseModel):
     id: int
     type: str
@@ -46,6 +54,13 @@ class SourceBrief(BaseModel):
     last_check: Optional[str] = None
     last_error: Optional[str] = None
     directory: str
+
+
+class SourceSummary(SourceBrief):
+    recent_content_count: int = 0
+    recent_signal_count: int = 0
+    recent_new_signal_count: int = 0
+    window_days: int = 7
 
 
 class GroupDetailResp(GroupResp):
@@ -78,11 +93,67 @@ class SourceUpdateReq(BaseModel):
 # ---------- Research ----------
 
 class ResearchReq(BaseModel):
-    question: str
+    question: str = Field(min_length=1, max_length=2000)
     platforms: Optional[list[str]] = None
     days: int = 7
     search_limit: Optional[int] = None
     comment_top_n: Optional[int] = None
+
+
+# ---------- Ask Tingfeng ----------
+
+class GroupAskReq(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    days: int = Field(default=30, ge=1, le=365)
+    limit: int = Field(default=12, ge=1, le=30)
+
+
+class GroupAskEvidence(BaseModel):
+    content_id: str
+    source_id: int
+    author: str
+    title: str = ""
+    url: str = ""
+    create_time: str = ""
+    signal_summary: str = ""
+    new_points: list[str] = Field(default_factory=list)
+    snippet: str = ""
+
+
+class GroupAskResp(BaseModel):
+    answer: str
+    evidence: list[GroupAskEvidence] = Field(default_factory=list)
+    scope: str = "internal"
+    days: int
+    evidence_count: int
+
+
+class AskMessageResp(BaseModel):
+    id: int
+    role: str
+    content: str
+    evidence: list[GroupAskEvidence] = Field(default_factory=list)
+    created_at: str
+
+
+class AskConversationBrief(BaseModel):
+    id: int
+    group_id: int
+    title: str
+    latest_answer: str = ""
+    evidence_count: int = 0
+    message_count: int = 0
+    created_at: str
+    updated_at: str
+
+
+class AskConversationDetail(BaseModel):
+    id: int
+    group_id: int
+    title: str
+    messages: list[AskMessageResp] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
 
 
 class TaskResp(BaseModel):

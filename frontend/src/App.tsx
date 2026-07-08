@@ -1,8 +1,10 @@
 import { NavLink, Route, Routes } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
+import Topics from './pages/Topics'
 import GroupLayout from './layouts/GroupLayout'
 import GroupDetail from './pages/GroupDetail'
 import CreatorDetail from './pages/CreatorDetail'
+import ListeningManage from './pages/ListeningManage'
 import ResearchForm from './pages/ResearchForm'
 import TaskProgress from './pages/TaskProgress'
 import ReportView from './pages/ReportView'
@@ -35,6 +37,7 @@ export default function App() {
           </NavLink>
           <nav className="top-nav">
             <NavItem to="/" label="今日" />
+            <NavItem to="/topics" label="专题" />
             <NavItem to="/settings" label="设置" />
           </nav>
         </div>
@@ -43,11 +46,13 @@ export default function App() {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/topics" element={<Topics />} />
           <Route path="/groups/:id" element={<GroupLayout />}>
             <Route index element={<GroupDetail />} />
+            <Route path="listening" element={<ListeningManage />} />
+            <Route path="research" element={<ResearchForm />} />
           </Route>
           <Route path="/groups/:id/creators/:sid" element={<CreatorDetail />} />
-          <Route path="/groups/:id/research" element={<ResearchForm />} />
           <Route path="/tasks" element={<TasksList />} />
           <Route path="/tasks/:id" element={<TaskProgress />} />
           <Route path="/reports/:id" element={<ReportView />} />

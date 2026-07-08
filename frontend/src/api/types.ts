@@ -26,6 +26,14 @@ export interface Group {
   updated_at: string
 }
 
+export interface GroupSummary extends Group {
+  recent_content_count: number
+  recent_signal_count: number
+  recent_new_signal_count: number
+  failed_source_count: number
+  window_days: number
+}
+
 export interface GroupDetail extends Group {
   sources: SourceBrief[]
 }

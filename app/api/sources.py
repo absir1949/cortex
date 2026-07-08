@@ -1,9 +1,13 @@
 from __future__ import annotations
+from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query
 
-from app.api.schemas import SourceCreateReq, SourceUpdateReq, SourceBrief
+from app.api.schemas import SourceCreateReq, SourceUpdateReq, SourceBrief, SourceSummary
+from app.db.engine import get_session
+from app.db.repos import SignalRepo
 from app.services.source_service import SourceService
 from app.models.group import TaskKind
+from app.storage.fs import StorageManager
 from app.tasks import get_runner
 
 
@@ -17,6 +21,56 @@ def _to_brief(s) -> SourceBrief:
         interval_hours=s.interval_hours, last_check=s.last_check,
         last_error=s.last_error, directory=s.directory,
     )
+
+
+def _parse_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    raw = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(raw)
+        return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value[:len(fmt)], fmt)
+        except ValueError:
+            continue
+    return None
+
+
+@router.get("/summary", response_model=list[SourceSummary])
+def list_source_summaries(group_id: int, days: int = Query(7, ge=1, le=90)):
+    """关注源列表摘要：用于专题侧栏和关注管理页。"""
+    sources = SourceService().list_by_group(group_id)
+    cutoff = datetime.now() - timedelta(days=days)
+    out: list[SourceSummary] = []
+    with get_session() as s:
+        signal_repo = SignalRepo(s)
+        for src in sources:
+            metadata = StorageManager(src.directory).list_metadata()
+            recent_cids: set[str] = set()
+            for md in metadata:
+                created = _parse_time(md.get("create_time", ""))
+                if created and created >= cutoff:
+                    cid = md.get("content_id") or md.get("video_id")
+                    if cid:
+                        recent_cids.add(cid)
+            signals = signal_repo.list_by_source(src.id, limit=500)
+            recent_signals = []
+            for sig in signals:
+                created = _parse_time(sig.created_at)
+                if created and created >= cutoff:
+                    recent_signals.append(sig)
+            out.append(SourceSummary(
+                **_to_brief(src).model_dump(),
+                recent_content_count=len(recent_cids),
+                recent_signal_count=len(recent_signals),
+                recent_new_signal_count=sum(1 for sig in recent_signals if sig.is_new),
+                window_days=days,
+            ))
+    return out
 
 
 @router.post("", response_model=SourceBrief, status_code=201)

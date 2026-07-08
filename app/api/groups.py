@@ -1,15 +1,17 @@
 from __future__ import annotations
+from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query
 
 from app.api.schemas import (
     GroupCreateReq, GroupUpdateReq,
-    GroupResp, GroupDetailResp, SourceBrief,
+    GroupResp, GroupSummaryResp, GroupDetailResp, SourceBrief,
 )
 from app.services.group_service import GroupService
 from app.services.source_service import SourceService
 from app.db.engine import get_session
-from app.db.repos import GroupRepo
+from app.db.repos import GroupRepo, SignalRepo
 from app.models.group import TaskKind
+from app.storage.fs import StorageManager
 from app.tasks import get_runner
 
 
@@ -31,6 +33,23 @@ def _to_resp(g, source_count: int = 0) -> GroupResp:
     )
 
 
+def _parse_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    raw = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(raw)
+        return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value[:len(fmt)], fmt)
+        except ValueError:
+            continue
+    return None
+
+
 @router.get("", response_model=list[GroupResp])
 def list_groups():
     svc = GroupService()
@@ -40,6 +59,44 @@ def list_groups():
         repo = GroupRepo(s)
         counts = {g.id: repo.source_count(g.id) for g in groups}
     return [_to_resp(g, counts.get(g.id, 0)) for g in groups]
+
+
+@router.get("/summary", response_model=list[GroupSummaryResp])
+def list_group_summaries(days: int = Query(7, ge=1, le=90)):
+    groups = GroupService().list()
+    cutoff = datetime.now() - timedelta(days=days)
+    with get_session() as s:
+        group_repo = GroupRepo(s)
+        signal_repo = SignalRepo(s)
+        out: list[GroupSummaryResp] = []
+        for group in groups:
+            sources = SourceService().list_by_group(group.id)
+            recent_content_ids: set[tuple[int, str]] = set()
+            failed_source_count = 0
+            for src in sources:
+                if src.last_error:
+                    failed_source_count += 1
+                for md in StorageManager(src.directory).list_metadata():
+                    created = _parse_time(md.get("create_time", ""))
+                    if not created or created < cutoff:
+                        continue
+                    cid = md.get("content_id") or md.get("video_id")
+                    if cid:
+                        recent_content_ids.add((src.id, cid))
+            recent_signals = []
+            for sig in signal_repo.list_by_group(group.id, limit=1000):
+                created = _parse_time(sig.created_at)
+                if created and created >= cutoff:
+                    recent_signals.append(sig)
+            out.append(GroupSummaryResp(
+                **_to_resp(group, group_repo.source_count(group.id)).model_dump(),
+                recent_content_count=len(recent_content_ids),
+                recent_signal_count=len(recent_signals),
+                recent_new_signal_count=sum(1 for sig in recent_signals if sig.is_new),
+                failed_source_count=failed_source_count,
+                window_days=days,
+            ))
+    return out
 
 
 @router.post("", response_model=GroupResp, status_code=201)

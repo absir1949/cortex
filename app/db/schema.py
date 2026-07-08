@@ -12,13 +12,15 @@
   content_items      每条内容的处理状态（水位、失败、补跑依据）
   analyzed_content   已分析过的 content_id（增量分析，替代 .analyzed.json）
   signals            每条内容的观点判定（新观点/老调重弹）+ 提炼的新观点
+  ask_conversations  问听风专题内对话
+  ask_messages       问听风对话消息
   prompt_history     prompt 修改历史（保留版本）
   schema_version     迁移版本号
 """
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import JSON, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, UniqueConstraint
 from sqlmodel import Field, SQLModel, Column
 
 
@@ -275,6 +277,33 @@ class Signal(SQLModel, table=True):
     matched_points: list = Field(default_factory=list, sa_column=Column(JSON))  # 命中的已有观点（去重证据）
     new_points: list = Field(default_factory=list, sa_column=Column(JSON))      # 本次贡献的新观点
 
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+# ---------- 问听风对话 ----------
+
+class AskConversation(SQLModel, table=True):
+    __tablename__ = "ask_conversations"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    group_id: int = Field(
+        sa_column=Column(ForeignKey("knowledge_groups.id", ondelete="CASCADE"), index=True, nullable=False),
+    )
+    title: str = ""
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+class AskMessage(SQLModel, table=True):
+    __tablename__ = "ask_messages"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    conversation_id: int = Field(
+        sa_column=Column(ForeignKey("ask_conversations.id", ondelete="CASCADE"), index=True, nullable=False),
+    )
+    role: str = Field(index=True)  # user / assistant
+    content: str = ""
+    evidence: list = Field(default_factory=list, sa_column=Column(JSON))
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 

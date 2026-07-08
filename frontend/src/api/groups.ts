@@ -1,9 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
-import type { Group, GroupDetail, SourceBrief } from './types'
+import type { Group, GroupSummary, GroupDetail, SourceBrief } from './types'
 
 export const useGroups = () =>
   useQuery({ queryKey: ['groups'], queryFn: () => api.get<Group[]>('/groups') })
+
+export const useGroupSummaries = (days = 7) =>
+  useQuery({
+    queryKey: ['groups', 'summary', days],
+    queryFn: () => api.get<GroupSummary[]>(`/groups/summary?days=${days}`),
+  })
 
 export const useGroup = (id: number | null | undefined) =>
   useQuery({

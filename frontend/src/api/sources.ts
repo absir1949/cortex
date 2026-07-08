@@ -16,6 +16,23 @@ export interface SourceDetail {
   aliases: { platform: string; platform_uid: string; display_name: string }[]
 }
 
+export interface SourceSummary {
+  id: number
+  type: 'creator' | 'keyword'
+  platform: string
+  identifier: string
+  display_name: string
+  enabled: boolean
+  interval_hours: number | null
+  last_check: string | null
+  last_error: string | null
+  directory: string
+  recent_content_count: number
+  recent_signal_count: number
+  recent_new_signal_count: number
+  window_days: number
+}
+
 export interface SourceContent {
   content_id: string
   title: string
@@ -43,6 +60,13 @@ export const useSourceDetail = (groupId: number | null | undefined, sourceId: nu
     queryKey: ['source', groupId, sourceId],
     queryFn: () => api.get<SourceDetail>(`/groups/${groupId}/sources/${sourceId}`),
     enabled: !!groupId && !!sourceId,
+  })
+
+export const useGroupSourceSummaries = (groupId: number | null | undefined, days = 7) =>
+  useQuery({
+    queryKey: ['source-summaries', groupId, days],
+    queryFn: () => api.get<SourceSummary[]>(`/groups/${groupId}/sources/summary?days=${days}`),
+    enabled: !!groupId,
   })
 
 export const useSourceContents = (groupId: number | null | undefined, sourceId: number | null | undefined, limit = 20, offset = 0) =>

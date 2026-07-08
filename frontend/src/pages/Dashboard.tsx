@@ -1,98 +1,132 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { useGroups, useCreateGroup } from '../api/groups'
+import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { useGroups } from '../api/groups'
 import { useRecentNewSignals } from '../api/signals'
 import SignalItem from '../components/SignalItem'
+import type { Signal } from '../api/types'
 
-/** 首页 = 全局时间流。所有知识库的新观点混合按时间倒序，扫一眼掌握全行业。 */
+function formatTime(value?: string | null) {
+  if (!value) return ''
+  return value.slice(0, 16).replace('T', ' ')
+}
+
+function formatToday() {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long',
+  }).format(new Date())
+}
+
 export default function Dashboard() {
-  const { data: groups = [], isLoading } = useGroups()
+  const { data: groups = [] } = useGroups()
   const { data: newSignals = [] } = useRecentNewSignals(30)
-  const createGroup = useCreateGroup()
-  const navigate = useNavigate()
+  const [activeLeadIndex, setActiveLeadIndex] = useState(0)
 
-  const [showCreate, setShowCreate] = useState(false)
-  const [name, setName] = useState('')
+  const leadSignals = useMemo(() => newSignals.slice(0, 3), [newSignals])
+  const leadSignal = leadSignals[activeLeadIndex] || leadSignals[0]
+  const leadSignalIds = useMemo(() => new Set(leadSignals.map((s) => s.id)), [leadSignals])
+  const timelineSignals = newSignals.filter((s) => !leadSignalIds.has(s.id))
+  const hasTopics = groups.length > 0
+
+  useEffect(() => {
+    setActiveLeadIndex(0)
+  }, [leadSignals.length])
+
+  useEffect(() => {
+    if (leadSignals.length <= 1) return
+    const timer = window.setInterval(() => {
+      setActiveLeadIndex((index) => (index + 1) % leadSignals.length)
+    }, 6000)
+    return () => window.clearInterval(timer)
+  }, [leadSignals.length])
 
   return (
     <div className="home-page">
-      {/* 主体：全局新信号流 */}
-      <section className="feed-section">
-        <div className="feed-header">
-          <span className="soft-label">NEW SIGNALS</span>
-          <h1>今天的新观点</h1>
+      <section className="home-edition">
+        <div className="home-edition-main">
+          <div className="home-edition-kicker">
+            <span className="soft-label">{formatToday()}</span>
+            <Link className="text-link-button" to="/topics">专题</Link>
+          </div>
+
+          {leadSignal ? (
+            <LeadSignalCard signal={leadSignal} />
+          ) : (
+            <div className="home-empty-note">
+              <strong>{hasTopics ? '暂无新信号' : '暂无专题'}</strong>
+              <Link to="/topics">{hasTopics ? '查看专题' : '订阅专题'}</Link>
+            </div>
+          )}
         </div>
 
-        {newSignals.length === 0 ? (
-          <div className="empty-feed">
-            {groups.length === 0 ? (
-              <>
-                <p>还没有专题。先订阅一个主题，听风会帮你盯着。</p>
-                <button className="pill-button primary" onClick={() => setShowCreate(true)}>订阅第一个专题</button>
-              </>
-            ) : (
-              <p>最近还没有新观点。系统会在下次采集后更新。</p>
-            )}
+        <aside className="home-edition-side">
+          <div className="home-side-title">
+            <strong>{leadSignals.length} 条新信号</strong>
           </div>
+          {leadSignals.length === 0 ? (
+            <p className="muted-line">暂无</p>
+          ) : (
+            leadSignals.map((s, index) => (
+              <article key={s.id} className={`home-side-signal ${index === activeLeadIndex ? 'active' : ''}`}>
+                <button type="button" onClick={() => setActiveLeadIndex(index)}>
+                  {s.summary}
+                </button>
+                <SignalMeta signal={s} />
+              </article>
+            ))
+          )}
+        </aside>
+      </section>
+
+      <section className="feed-section">
+        <div className="feed-header">
+          <h1>时间线</h1>
+          <span className="reader-tag">{timelineSignals.length}</span>
+        </div>
+        {timelineSignals.length === 0 ? (
+          <div className="empty-feed"><p>{newSignals.length === 0 ? '暂无新观点' : '暂无更多'}</p></div>
         ) : (
           <div className="signal-feed">
-            {newSignals.map((s) => (
+            {timelineSignals.map((s) => (
               <SignalItem key={s.id} signal={s} showGroupName />
             ))}
           </div>
         )}
       </section>
+    </div>
+  )
+}
 
-      {/* 专题入口（底部导航，紧凑）*/}
-      <section className="section-title-row">
-        <div>
-          <span className="soft-label">YOUR TOPICS</span>
-          <h2>你的专题</h2>
-        </div>
-        <button className="pill-button" onClick={() => setShowCreate(!showCreate)}>
-          {showCreate ? '收起' : '订阅新专题'}
-        </button>
-      </section>
+function LeadSignalCard({ signal }: { signal: Signal }) {
+  return (
+    <article className="home-lead-signal">
+      <SignalMeta signal={signal} />
+      <Link to={signal.group_id ? `/groups/${signal.group_id}` : '/'} className="home-lead-title">
+        {signal.summary}
+      </Link>
+      <small>{formatTime(signal.created_at)}</small>
+    </article>
+  )
+}
 
-      {showCreate && (
-        <form
-          className="new-topic-form"
-          onSubmit={async (e) => {
-            e.preventDefault()
-            if (!name.trim()) return
-            const g = await createGroup.mutateAsync({
-              name: name.trim(),
-              defaults: { interval_hours: 24, days: 7, content_limit: 50, comment_top_n: 20 },
-            })
-            setName('')
-            setShowCreate(false)
-            navigate(`/groups/${g.id}`)
-          }}
-        >
-          <input
-            className="input"
-            placeholder="专题名，例如：微信小店"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <button className="pill-button primary" disabled={!name.trim() || createGroup.isPending}>
-            {createGroup.isPending ? '创建中' : '开始订阅'}
-          </button>
-        </form>
+function SignalMeta({ signal }: { signal: Signal }) {
+  const creatorPath = signal.group_id && signal.source_id
+    ? `/groups/${signal.group_id}/creators/${signal.source_id}`
+    : null
+  return (
+    <div className="home-signal-meta">
+      {signal.group_id ? (
+        <Link to={`/groups/${signal.group_id}`}>{signal.group_name || '专题'}</Link>
+      ) : (
+        <span>{signal.group_name || '专题'}</span>
       )}
-
-      <div className="topic-grid">
-        {isLoading && <div className="muted-line">正在加载...</div>}
-        {groups.map((g) => (
-          <Link to={`/groups/${g.id}`} key={g.id} className="topic-card">
-            <div className="topic-card-main">
-              <span className="topic-status">{g.enabled ? '自动更新' : '已暂停'}</span>
-              <h3>{g.name}</h3>
-              <p>{g.source_count} 个关注源</p>
-            </div>
-          </Link>
-        ))}
-      </div>
+      <span>·</span>
+      {creatorPath ? (
+        <Link to={creatorPath}>{signal.source_name || '作者'}</Link>
+      ) : (
+        <span>{signal.source_name || '作者'}</span>
+      )}
     </div>
   )
 }

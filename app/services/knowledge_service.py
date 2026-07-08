@@ -1,7 +1,8 @@
 """AI 知识提炼 - 视频原话 vs 观众评论分开喂给 LLM"""
 from __future__ import annotations
 import json
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -143,7 +144,204 @@ class KnowledgeService:
             config=llm_config,
         )
 
+    def answer_group_question(
+        self,
+        group_id: int,
+        question: str,
+        *,
+        days: int = 30,
+        limit: int = 12,
+    ) -> dict:
+        """问听风：只基于专题内已有材料回答，不触发外部搜索。"""
+        with get_session() as s:
+            group = GroupRepo(s).get(group_id)
+            if not group:
+                raise ValueError("group not found")
+            sources = SourceRepo(s).list_by_group(group_id)
+            source_map = {src.id: src for src in sources}
+            signals = SignalRepo(s).list_by_group(group_id, limit=500)
+
+        evidence_pool = self._collect_group_evidence(
+            source_map,
+            signals,
+            question=question,
+            days=days,
+            limit=limit,
+        )
+        if not evidence_pool:
+            return {
+                "answer": "这个专题里还没有可用于回答的转录、评论或观点信号。先刷新专题，等内容进入知识库后再问会更准。",
+                "evidence": [],
+                "scope": "internal",
+                "days": days,
+                "evidence_count": 0,
+            }
+
+        prompt = self._build_group_ask_prompt(question, evidence_pool)
+        try:
+            answer = self.llm.chat(
+                [
+                    LLMMessage(
+                        role="system",
+                        content=(
+                            "你是听风的专题阅读助手。只能基于用户当前专题内给出的证据回答；"
+                            "不要使用外部知识，不要编造来源。证据不足时要直说。"
+                        ),
+                    ),
+                    LLMMessage(role="user", content=prompt),
+                ],
+                config=config_service.get_llm_config(),
+            )
+        except Exception as e:
+            raise RuntimeError(f"问听风失败：{e}") from e
+
+        return {
+            "answer": answer,
+            "evidence": [
+                {
+                    "content_id": ev.get("content_id", ""),
+                    "source_id": ev.get("source_id", 0),
+                    "author": ev.get("author", ""),
+                    "title": ev.get("title", ""),
+                    "url": ev.get("url", ""),
+                    "create_time": ev.get("create_time", ""),
+                    "signal_summary": ev.get("signal_summary", ""),
+                    "new_points": ev.get("new_points", []),
+                    "snippet": ev.get("snippet", ""),
+                }
+                for ev in evidence_pool
+            ],
+            "scope": "internal",
+            "days": days,
+            "evidence_count": len(evidence_pool),
+        }
+
     # ============ 内部 ============
+
+    @staticmethod
+    def _question_terms(question: str) -> list[str]:
+        text = question.lower()
+        raw = re.findall(r"[a-zA-Z0-9_\u4e00-\u9fff]+", text)
+        stop = {
+            "最近", "这些", "他们", "她们", "它们", "什么", "怎么", "如何",
+            "观点", "变化", "强调", "一下", "哪些", "有没有", "关于", "这个",
+            "那个", "专题", "作者", "内容",
+        }
+        terms: list[str] = []
+        for token in raw:
+            if token in stop:
+                continue
+            if re.fullmatch(r"[\u4e00-\u9fff]+", token) and len(token) > 4:
+                # 中文长句没有空格时，用 2-4 字片段提高召回。
+                for size in (4, 3, 2):
+                    for i in range(0, len(token) - size + 1):
+                        gram = token[i:i + size]
+                        if gram not in stop and gram not in terms:
+                            terms.append(gram)
+            elif len(token) >= 2:
+                terms.append(token)
+        return terms[:40]
+
+    @staticmethod
+    def _parse_time(value: str) -> Optional[datetime]:
+        if not value:
+            return None
+        raw = value.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(raw)
+            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+        except ValueError:
+            pass
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(value[:len(fmt)], fmt)
+            except ValueError:
+                continue
+        return None
+
+    def _collect_group_evidence(
+        self,
+        source_map: dict[int, object],
+        signals: list,
+        *,
+        question: str,
+        days: int,
+        limit: int,
+    ) -> list[dict]:
+        signal_map = {(sig.source_id, sig.content_id): sig for sig in signals}
+        terms = self._question_terms(question)
+        cutoff = datetime.now() - timedelta(days=days)
+        candidates: list[dict] = []
+
+        for source_id, source in source_map.items():
+            storage = StorageManager(source.directory)
+            for md in storage.list_metadata():
+                cid = md.get("content_id") or md.get("video_id")
+                if not cid:
+                    continue
+                created = self._parse_time(md.get("create_time", ""))
+                if created and created < cutoff:
+                    continue
+                transcript = storage.get_transcript(cid) or ""
+                comments = storage.get_comments(cid) or []
+                sig = signal_map.get((source_id, cid))
+                if not transcript and not comments and not sig:
+                    continue
+
+                comment_text = "\n".join((c.get("text", "") or "") for c in comments[:12])
+                signal_summary = sig.summary if sig else ""
+                new_points = list(sig.new_points or []) if sig else []
+                searchable = "\n".join([
+                    md.get("title", ""),
+                    signal_summary,
+                    "\n".join(new_points),
+                    transcript,
+                    comment_text,
+                ]).lower()
+                term_score = sum(1 for t in terms if t and t in searchable)
+                signal_score = 2 if sig and sig.is_new else (1 if sig else 0)
+                recency_score = 0
+                if created:
+                    age_days = max(0, (datetime.now() - created).days)
+                    recency_score = max(0, days - age_days) / max(days, 1)
+                score = term_score * 3 + signal_score + recency_score
+                if not terms:
+                    score += recency_score
+
+                snippet_source = transcript or comment_text or signal_summary
+                candidates.append({
+                    "score": score,
+                    "content_id": cid,
+                    "source_id": source_id,
+                    "author": source.display_name,
+                    "title": md.get("title", ""),
+                    "url": md.get("url", ""),
+                    "create_time": md.get("create_time", ""),
+                    "transcript": transcript,
+                    "comments": comments,
+                    "signal_summary": signal_summary,
+                    "new_points": new_points,
+                    "snippet": snippet_source[:220].replace("\n", " "),
+                })
+
+        candidates.sort(key=lambda ev: (ev["score"], ev.get("create_time", "")), reverse=True)
+        positive = [ev for ev in candidates if ev["score"] > 0]
+        selected = positive[:limit] if positive else candidates[:limit]
+        return selected
+
+    @classmethod
+    def _build_group_ask_prompt(cls, question: str, evidence: list[dict]) -> str:
+        evidence_block = cls._build_evidence_block(evidence)
+        return (
+            f"用户问题：{question}\n\n"
+            "下面是当前专题内部已经采集、转录和判定过的材料。请只基于这些材料回答。\n\n"
+            f"{evidence_block}\n\n"
+            "请用中文输出：\n"
+            "1. 先给 3-5 条直接结论；\n"
+            "2. 再说明依据来自哪些作者/内容；\n"
+            "3. 如果证据不足或只来自少数作者，要明确标注不确定性；\n"
+            "4. 不要提外部资料，不要把没有证据的判断写成事实。"
+        )
 
     def _collect_new_items(self, source) -> list[dict]:
         """从该源目录读已转录且已完成 Signal 的 content，过滤掉已分析项。"""
@@ -314,6 +512,12 @@ class KnowledgeService:
         for i, ev in enumerate(evidence, 1):
             header = f"【证据 {i}】{ev.get('author', '')} · {ev.get('title', '')[:50]}\n来源：{ev.get('url', '')}"
             body: list[str] = []
+            if ev.get("signal_summary") or ev.get("new_points"):
+                body.append("[观点信号]")
+                if ev.get("signal_summary"):
+                    body.append(f"  摘要：{ev.get('signal_summary')}")
+                for p in ev.get("new_points") or []:
+                    body.append(f"  - {p}")
             if ev.get("transcript"):
                 t = ev["transcript"]
                 body.append(f"[博主原话]\n{t[:2000]}" + ("..." if len(t) > 2000 else ""))

@@ -101,20 +101,27 @@ export default function CreatorDetail() {
   const profileText = typeof profile === 'string' ? profile : ''
   const hasProfile = profileText && !profileText.includes('尚未建立') && !profileText.includes('尚未关联')
   const hasMore = items.length < total
+  const platformLabel = PLATFORM_LABELS[detail.platform] || detail.platform
 
   return (
-    <div className="topic-page">
+    <div className="creator-page">
       <div className="breadcrumb-bar">
         <Link to="/" className="back-link">今日</Link>
         <span className="breadcrumb-sep">›</span>
         <Link to={`/groups/${gid}`} className="breadcrumb-group">{group?.name || '专题'}</Link>
       </div>
 
-      <section className="reader-block lead-block">
-        <div className="reader-block-head">
-          <div>
-            <span className="soft-label">{PLATFORM_LABELS[detail.platform] || detail.platform}</span>
-            <h2>{detail.name}</h2>
+      <section className="creator-hero">
+        <div className="creator-hero-row">
+          <div className="creator-identity">
+            <h1>{detail.name}</h1>
+            <div className="creator-metrics">
+              <span className="platform-tag">{platformLabel}</span>
+              {detail.last_check && <span>最近采集 {formatTime(detail.last_check)}</span>}
+              <span>{total} 条内容</span>
+              <span>{newCount} 条新信号</span>
+              <span>{repeatCount} 条重复</span>
+            </div>
           </div>
           <div className="creator-actions">
             <select
@@ -144,23 +151,14 @@ export default function CreatorDetail() {
             </button>
           </div>
         </div>
-        <div style={{ fontSize: 14, color: '#66756d' }}>
-          {detail.last_check && <span>最近采集 {formatTime(detail.last_check)}</span>}
-          <span> · 共 {total} 条内容 · 🆕 {newCount} · ♻️ {repeatCount}</span>
-        </div>
-        {detail.last_error && (
-          <em style={{ display: 'block', color: '#c2413a', marginTop: 8, fontSize: 13 }}>
-            上次采集出错：{detail.last_error.slice(0, 120)}
-          </em>
-        )}
-        {notice && <div className="notice-line" style={{ marginTop: 8 }}>{notice}</div>}
+        {detail.last_error && <em className="creator-error">上次采集出错：{detail.last_error.slice(0, 120)}</em>}
+        {notice && <div className="notice-line">{notice}</div>}
       </section>
 
       {hasProfile && (
         <section className="reader-block">
           <div className="reader-block-head">
             <div>
-              <span className="soft-label">PROFILE</span>
               <h2>观点档案</h2>
             </div>
             <button className="pill-button small" onClick={() => setShowProfile(!showProfile)}>
@@ -168,7 +166,7 @@ export default function CreatorDetail() {
             </button>
           </div>
           {showProfile && (
-            <div className="card prose-cortex" style={{ marginTop: 12 }}>
+            <div className="creator-profile-body prose-cortex">
               <ReactMarkdown>{profileText}</ReactMarkdown>
             </div>
           )}
@@ -178,7 +176,6 @@ export default function CreatorDetail() {
       <section className="reader-block">
         <div className="reader-block-head">
           <div>
-            <span className="soft-label">CONTENT</span>
             <h2>最近内容</h2>
           </div>
           <span className="reader-tag">{total}</span>
@@ -192,17 +189,17 @@ export default function CreatorDetail() {
                 <article key={c.content_id} className={`signal-item${c.is_new_signal === false ? ' is-repeat' : ''}`}>
                   <div className="signal-item-head">
                     <span className="signal-item-badge">
-                      {c.is_new_signal === true ? '🆕' : c.is_new_signal === false ? '♻️' : '·'}
+                      {c.is_new_signal === true ? '新' : c.is_new_signal === false ? '复' : '·'}
                     </span>
                     <span className="signal-item-summary">{c.title || '（无标题）'}</span>
                   </div>
                   <div className="signal-meta">
                     <span>{formatTime(c.create_time)}</span>
                     {c.statistics && c.statistics.digg_count != null && (
-                      <><span>·</span><span>👍 {c.statistics.digg_count}</span></>
+                      <><span>·</span><span>赞 {c.statistics.digg_count}</span></>
                     )}
                     {c.url && (
-                      <><span>·</span><a href={c.url} target="_blank" rel="noreferrer">看原视频 ↗</a></>
+                      <><span>·</span><a href={c.url} target="_blank" rel="noreferrer">原视频</a></>
                     )}
                     {c.transcribed && (
                       <><span>·</span><TranscriptToggle contentId={c.content_id} /></>

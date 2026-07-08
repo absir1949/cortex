@@ -1,12 +1,10 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useGroup } from '../api/groups'
 import { useCreateResearch } from '../api/research'
 
 export default function ResearchForm() {
   const { id } = useParams()
   const gid = Number(id)
-  const { data: group } = useGroup(gid)
   const create = useCreateResearch(gid)
   const navigate = useNavigate()
 
@@ -15,7 +13,7 @@ export default function ResearchForm() {
   const [limit, setLimit] = useState(10)
   const [topN, setTopN] = useState(20)
 
-  const onSubmit = async (e: React.FormEvent) => {
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (!question.trim()) return
     const { task_id } = await create.mutateAsync({
@@ -30,11 +28,7 @@ export default function ResearchForm() {
   return (
     <div className="space-y-4">
       <div>
-        <div className="text-xs text-muted">{group?.name}</div>
-        <h1 className="text-2xl font-semibold">按需研究</h1>
-        <div className="text-sm text-muted mt-1">
-          输入问题 → 系统搜抖音 → 下载并转录 → 抓评论 → AI 汇总作答。
-        </div>
+        <h1 className="text-2xl font-semibold">追问</h1>
       </div>
 
       <form onSubmit={onSubmit} className="card space-y-4">
@@ -89,7 +83,7 @@ export default function ResearchForm() {
             取消
           </button>
           <button type="submit" className="btn-primary" disabled={!question.trim() || create.isPending}>
-            {create.isPending ? '提交中...' : '开始研究'}
+            {create.isPending ? '提交中...' : '开始追问'}
           </button>
         </div>
       </form>
