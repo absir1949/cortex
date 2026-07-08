@@ -431,6 +431,9 @@ class IngestService:
                     storage.save_transcript(content.content_id, transcript, content.create_time)
                     from app.api.contents import invalidate_transcript_cache
                     invalidate_transcript_cache(content.content_id)
+                    # 转录成功后删除视频文件，只保留转录文本和元数据（省空间）
+                    if final_path and final_path.exists():
+                        final_path.unlink(missing_ok=True)
                     counts["transcribed"] += 1
                     self._update_content_stage(source.id, content.content_id, transcript_status=STATUS_SUCCEEDED, transcript_error="")
                 except Exception as e:
