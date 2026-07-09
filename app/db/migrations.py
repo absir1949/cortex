@@ -295,6 +295,270 @@ def _rebuild_knowledge_groups_drop_slug_unique(engine) -> None:
                 raise RuntimeError(f"foreign key check failed after knowledge_groups rebuild: {violations[:5]}")
 
 
+# ============ Migration 008: 共享采集 runtime 回填 ============
+
+@register(8, "008_shared_ingest_runtime: 回填全局内容、水位、采集目标和全局信号键")
+def _mig_008_shared_ingest_runtime(session: Session) -> None:
+    from sqlalchemy import text, inspect
+
+    engine = get_engine()
+    SQLModel.metadata.create_all(engine)
+    inspector = inspect(engine)
+
+    signal_cols = {c["name"] for c in inspector.get_columns("signals")}
+    if "global_content_id" not in signal_cols:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE signals ADD COLUMN global_content_id INTEGER REFERENCES global_content(id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_signals_global_content_id ON signals (global_content_id)"))
+            conn.commit()
+
+    # 某些真实/测试旧库的 sources 表可能停在更早版本，create_all 不会给既有表补列。
+    source_cols = {c["name"] for c in inspector.get_columns("sources")}
+    source_add_columns = {
+        "creator_id": "INTEGER REFERENCES creators(id)",
+        "type": "VARCHAR DEFAULT ''",
+        "platform": "VARCHAR DEFAULT ''",
+        "identifier": "VARCHAR DEFAULT ''",
+        "display_name": "VARCHAR DEFAULT ''",
+        "enabled": "BOOLEAN DEFAULT 1",
+        "interval_hours": "INTEGER",
+        "days": "INTEGER",
+        "content_limit": "INTEGER",
+        "comment_top_n": "INTEGER",
+        "directory": "VARCHAR DEFAULT ''",
+        "last_check": "VARCHAR",
+        "last_error": "VARCHAR",
+        "created_at": "VARCHAR",
+    }
+    missing_source_cols = {k: v for k, v in source_add_columns.items() if k not in source_cols}
+    if missing_source_cols:
+        with engine.connect() as conn:
+            for col, ddl in missing_source_cols.items():
+                conn.execute(text(f"ALTER TABLE sources ADD COLUMN {col} {ddl}"))
+            conn.commit()
+        inspector = inspect(engine)
+
+    # 1. ContentItem -> GlobalContent，按 (platform, content_id) 去重。
+    rows = session.execute(text("""
+        SELECT
+            ci.platform,
+            ci.content_id,
+            MAX(COALESCE(ci.creator_id, s.creator_id)) AS creator_id,
+            MAX(ci.content_type) AS content_type,
+            MAX(ci.title) AS title,
+            MAX(ci.author_id) AS author_id,
+            MAX(ci.author_name) AS author_name,
+            MAX(ci.url) AS url,
+            MAX(ci.create_time) AS create_time,
+            MIN(ci.first_seen_at) AS first_seen_at,
+            MAX(ci.last_seen_at) AS last_seen_at,
+            MAX(ci.updated_at) AS updated_at,
+            MAX(ci.media_status) AS media_status,
+            MAX(ci.transcript_status) AS transcript_status,
+            MAX(ci.comments_status) AS comments_status,
+            MAX(ci.signal_status) AS signal_status,
+            MAX(ci.profile_status) AS profile_status,
+            MAX(ci.media_error) AS media_error,
+            MAX(ci.transcript_error) AS transcript_error,
+            MAX(ci.comments_error) AS comments_error,
+            MAX(ci.signal_error) AS signal_error,
+            MAX(ci.profile_error) AS profile_error,
+            MAX(ci.file_size) AS file_size,
+            MAX(ci.statistics) AS statistics
+        FROM content_items ci
+        LEFT JOIN sources s ON s.id = ci.source_id
+        WHERE ci.platform IS NOT NULL AND ci.platform != '' AND ci.content_id IS NOT NULL AND ci.content_id != ''
+        GROUP BY ci.platform, ci.content_id
+    """)).mappings().all()
+    for row in rows:
+        existing = session.execute(text("""
+            SELECT id FROM global_content WHERE platform = :platform AND content_id = :content_id
+        """), row).first()
+        payload = dict(row)
+        payload["now"] = datetime.now().isoformat()
+        if existing:
+            payload["id"] = existing[0]
+            session.execute(text("""
+                UPDATE global_content
+                SET creator_id = COALESCE(:creator_id, creator_id),
+                    content_type = COALESCE(NULLIF(:content_type, ''), content_type),
+                    title = COALESCE(NULLIF(:title, ''), title),
+                    author_id = COALESCE(NULLIF(:author_id, ''), author_id),
+                    author_name = COALESCE(NULLIF(:author_name, ''), author_name),
+                    url = COALESCE(NULLIF(:url, ''), url),
+                    create_time = COALESCE(NULLIF(:create_time, ''), create_time),
+                    last_seen_at = COALESCE(:last_seen_at, last_seen_at),
+                    updated_at = :now,
+                    media_status = COALESCE(NULLIF(:media_status, ''), media_status),
+                    transcript_status = COALESCE(NULLIF(:transcript_status, ''), transcript_status),
+                    comments_status = COALESCE(NULLIF(:comments_status, ''), comments_status),
+                    signal_status = COALESCE(NULLIF(:signal_status, ''), signal_status),
+                    profile_status = COALESCE(NULLIF(:profile_status, ''), profile_status),
+                    media_error = :media_error,
+                    transcript_error = :transcript_error,
+                    comments_error = :comments_error,
+                    signal_error = :signal_error,
+                    profile_error = :profile_error,
+                    file_size = COALESCE(:file_size, file_size),
+                    statistics = COALESCE(:statistics, statistics)
+                WHERE id = :id
+            """), payload)
+        else:
+            session.execute(text("""
+                INSERT INTO global_content (
+                    platform, content_id, creator_id, content_type, title, author_id, author_name, url, create_time,
+                    first_seen_at, last_seen_at, updated_at, media_status, transcript_status, comments_status,
+                    signal_status, profile_status, media_error, transcript_error, comments_error, signal_error,
+                    profile_error, file_size, statistics
+                ) VALUES (
+                    :platform, :content_id, :creator_id, COALESCE(:content_type, ''), COALESCE(:title, ''),
+                    COALESCE(:author_id, ''), COALESCE(:author_name, ''), COALESCE(:url, ''),
+                    COALESCE(:create_time, ''), COALESCE(:first_seen_at, :now), COALESCE(:last_seen_at, :now),
+                    COALESCE(:updated_at, :now), COALESCE(:media_status, 'pending'),
+                    COALESCE(:transcript_status, 'pending'), COALESCE(:comments_status, 'pending'),
+                    COALESCE(:signal_status, 'pending'), COALESCE(:profile_status, 'pending'),
+                    :media_error, :transcript_error, :comments_error, :signal_error, :profile_error,
+                    COALESCE(:file_size, 0), COALESCE(:statistics, '{}')
+                )
+            """), payload)
+    session.commit()
+
+    # 2. Sources -> IngestTarget，按 target 聚合并取最激进参数。
+    target_rows = session.execute(text("""
+        SELECT
+            platform,
+            type AS kind,
+            TRIM(identifier) AS target_key,
+            MIN(COALESCE(interval_hours, 48)) AS interval_hours,
+            MAX(COALESCE(days, 7)) AS days,
+            MAX(COALESCE(content_limit, 50)) AS content_limit,
+            MAX(COALESCE(comment_top_n, 20)) AS comment_top_n,
+            MAX(last_check) AS last_check,
+            MAX(last_error) AS last_error,
+            MAX(CASE WHEN enabled THEN 1 ELSE 0 END) AS enabled
+        FROM sources
+        WHERE platform IS NOT NULL AND platform != '' AND type IS NOT NULL AND type != '' AND identifier IS NOT NULL AND identifier != ''
+        GROUP BY platform, type, TRIM(identifier)
+    """)).mappings().all()
+    for row in target_rows:
+        payload = dict(row)
+        payload["now"] = datetime.now().isoformat()
+        existing = session.execute(text("""
+            SELECT id FROM ingest_targets WHERE platform = :platform AND kind = :kind AND target_key = :target_key
+        """), payload).first()
+        if existing:
+            payload["id"] = existing[0]
+            session.execute(text("""
+                UPDATE ingest_targets
+                SET enabled = :enabled,
+                    interval_hours = :interval_hours,
+                    days = :days,
+                    content_limit = :content_limit,
+                    comment_top_n = :comment_top_n,
+                    last_check = COALESCE(last_check, :last_check),
+                    last_error = COALESCE(last_error, :last_error),
+                    updated_at = :now
+                WHERE id = :id
+            """), payload)
+        else:
+            session.execute(text("""
+                INSERT INTO ingest_targets (
+                    platform, kind, target_key, enabled, interval_hours, days, content_limit, comment_top_n,
+                    last_check, last_error, created_at, updated_at
+                ) VALUES (
+                    :platform, :kind, :target_key, :enabled, :interval_hours, :days, :content_limit, :comment_top_n,
+                    :last_check, :last_error, :now, :now
+                )
+            """), payload)
+    session.commit()
+
+    # 3. ContentItem -> SourceContent + GroupContent，并映射已分析水位。
+    link_rows = session.execute(text("""
+        SELECT
+            ci.source_id,
+            ci.group_id,
+            gc.id AS global_content_id,
+            it.id AS ingest_target_id,
+            s.type AS source_type,
+            s.identifier AS source_identifier,
+            ac.id AS analyzed_id
+        FROM content_items ci
+        JOIN global_content gc ON gc.platform = ci.platform AND gc.content_id = ci.content_id
+        JOIN sources s ON s.id = ci.source_id
+        LEFT JOIN ingest_targets it ON it.platform = s.platform AND it.kind = s.type AND it.target_key = TRIM(s.identifier)
+        LEFT JOIN analyzed_content ac ON ac.source_id = ci.source_id AND ac.content_id = ci.content_id
+        WHERE ci.source_id IS NOT NULL AND ci.group_id IS NOT NULL
+    """)).mappings().all()
+    for row in link_rows:
+        payload = dict(row)
+        payload["matched_query"] = row["source_identifier"] if row["source_type"] == "keyword" else ""
+        payload["now"] = datetime.now().isoformat()
+        session.execute(text("""
+            INSERT OR IGNORE INTO source_content (source_id, global_content_id, ingest_target_id, matched_query, first_seen_at)
+            VALUES (:source_id, :global_content_id, :ingest_target_id, :matched_query, :now)
+        """), payload)
+        session.execute(text("""
+            UPDATE source_content
+            SET ingest_target_id = COALESCE(:ingest_target_id, ingest_target_id),
+                matched_query = COALESCE(NULLIF(:matched_query, ''), matched_query)
+            WHERE source_id = :source_id AND global_content_id = :global_content_id
+        """), payload)
+        analyzed_at = payload["now"] if row["analyzed_id"] else None
+        session.execute(text("""
+            INSERT OR IGNORE INTO group_content (group_id, global_content_id, first_seen_at, analyzed_at)
+            VALUES (:group_id, :global_content_id, :now, :analyzed_at)
+        """), {**payload, "analyzed_at": analyzed_at})
+        if analyzed_at:
+            session.execute(text("""
+                UPDATE group_content
+                SET analyzed_at = COALESCE(analyzed_at, :analyzed_at)
+                WHERE group_id = :group_id AND global_content_id = :global_content_id
+            """), {**payload, "analyzed_at": analyzed_at})
+    session.commit()
+
+    # 4. Signal -> global_content_id，随后按 global_content_id 去重。
+    session.execute(text("""
+        UPDATE signals
+        SET global_content_id = (
+            SELECT gc.id
+            FROM global_content gc
+            JOIN sources s ON s.id = signals.source_id
+            WHERE gc.platform = s.platform AND gc.content_id = signals.content_id
+            LIMIT 1
+        )
+        WHERE global_content_id IS NULL
+    """))
+    session.commit()
+
+    dup_ids = session.execute(text("""
+        SELECT global_content_id
+        FROM signals
+        WHERE global_content_id IS NOT NULL
+        GROUP BY global_content_id
+        HAVING COUNT(*) > 1
+    """)).all()
+    for (gid,) in dup_ids:
+        rows = session.execute(text("""
+            SELECT id, is_new, LENGTH(COALESCE(summary, '')) AS summary_len
+            FROM signals
+            WHERE global_content_id = :gid
+            ORDER BY is_new DESC, summary_len DESC, id ASC
+        """), {"gid": gid}).all()
+        keep_id = rows[0][0]
+        session.execute(text("""
+            DELETE FROM signals WHERE global_content_id = :gid AND id != :keep_id
+        """), {"gid": gid, "keep_id": keep_id})
+    session.commit()
+
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_signal_global_content
+            ON signals (global_content_id)
+            WHERE global_content_id IS NOT NULL
+        """))
+        conn.commit()
+
+
 # ============ 通用运行器 ============
 
 def current_version(session: Session) -> int:

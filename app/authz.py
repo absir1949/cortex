@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
-from app.db.schema import ContentItem, KnowledgeGroup, Report, Signal, Source, Task
+from app.db.schema import ContentItem, GlobalContent, GroupContent, KnowledgeGroup, Report, Signal, Source, Task
 
 
 def is_admin(current_user: dict) -> bool:
@@ -67,7 +67,25 @@ def assert_content_owner(
     platform: str,
     content_id: str,
     current_user: dict,
-) -> ContentItem:
+) -> ContentItem | GlobalContent:
+    global_item = session.exec(
+        select(GlobalContent).where(
+            GlobalContent.platform == platform,
+            GlobalContent.content_id == content_id,
+        )
+    ).first()
+    if global_item:
+        if is_admin(current_user):
+            return global_item
+        owned = session.exec(
+            select(GroupContent)
+            .join(KnowledgeGroup, KnowledgeGroup.id == GroupContent.group_id)
+            .where(GroupContent.global_content_id == global_item.id)
+            .where(KnowledgeGroup.owner_id == current_user_id(current_user))
+        ).first()
+        if owned:
+            return global_item
+
     stmt = select(ContentItem).where(
         ContentItem.platform == platform,
         ContentItem.content_id == content_id,
@@ -101,6 +119,16 @@ def assert_signal_owner(session: Session, signal_id: int, current_user: dict) ->
         raise HTTPException(404, "signal not found")
     if is_admin(current_user):
         return signal
+    if signal.global_content_id is not None:
+        owned = session.exec(
+            select(GroupContent)
+            .join(KnowledgeGroup, KnowledgeGroup.id == GroupContent.group_id)
+            .where(GroupContent.global_content_id == signal.global_content_id)
+            .where(KnowledgeGroup.owner_id == current_user_id(current_user))
+        ).first()
+        if owned:
+            return signal
+        raise HTTPException(404, "signal not found")
     if signal.group_id is None:
         raise HTTPException(404, "signal not found")
     assert_group_owner(session, signal.group_id, current_user)

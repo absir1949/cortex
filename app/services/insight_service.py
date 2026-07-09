@@ -15,6 +15,7 @@ from typing import Optional
 
 from app.db.engine import get_session
 from app.db.repos import SignalRepo, SourceRepo
+from app.db.schema import Source, SourceContent
 from app.llm import OpenAICompatClient, LLMMessage
 from app.services import config_service
 
@@ -67,11 +68,24 @@ class InsightService:
                 except Exception:
                     recent.append(sig)
             # 附博主名
-            source_ids = {sig.source_id for sig in recent}
             sources = {src.id: src for src in SourceRepo(s).list_by_group(group_id)}
+            missing_global_ids = [sig.global_content_id for sig in recent if sig.source_id not in sources and sig.global_content_id]
+            if missing_global_ids:
+                from sqlmodel import select
+                linked = s.exec(
+                    select(SourceContent.global_content_id, Source)
+                    .join(Source, Source.id == SourceContent.source_id)
+                    .where(Source.group_id == group_id)
+                    .where(SourceContent.global_content_id.in_(missing_global_ids))
+                ).all()
+                for _gid, src in linked:
+                    sources[src.id] = src
+                source_by_global = {gid: src for gid, src in linked}
+            else:
+                source_by_global = {}
         out = []
         for sig in recent:
-            src = sources.get(sig.source_id)
+            src = sources.get(sig.source_id) or source_by_global.get(sig.global_content_id)
             out.append({
                 "content_id": sig.content_id,
                 "source_id": sig.source_id,

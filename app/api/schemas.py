@@ -110,6 +110,8 @@ class GroupAskReq(BaseModel):
 
 class GroupAskEvidence(BaseModel):
     content_id: str
+    global_content_id: Optional[int] = None
+    platform: str = ""
     source_id: int
     author: str
     title: str = ""

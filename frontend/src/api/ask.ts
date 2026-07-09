@@ -3,6 +3,8 @@ import { api } from './client'
 
 export interface AskEvidence {
   content_id: string
+  global_content_id?: number | null
+  platform?: string
   source_id: number
   author: string
   title: string

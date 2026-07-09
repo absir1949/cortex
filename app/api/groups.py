@@ -11,7 +11,8 @@ from app.authz import assert_group_owner, current_user_id, is_admin
 from app.services.group_service import GroupService
 from app.services.source_service import SourceService
 from app.db.engine import get_session
-from app.db.repos import GroupRepo, SignalRepo
+from app.db.repos import GroupContentRepo, GroupRepo, SignalRepo
+from app.db.schema import GlobalContent
 from app.models.group import TaskKind
 from app.storage.fs import StorageManager
 from app.tasks import get_runner
@@ -76,18 +77,30 @@ def list_group_summaries(
         out: list[GroupSummaryResp] = []
         for group in groups:
             sources = SourceService().list_by_group(group.id)
-            recent_content_ids: set[tuple[int, str]] = set()
             failed_source_count = 0
             for src in sources:
                 if src.last_error:
                     failed_source_count += 1
-                for md in StorageManager(src.directory).list_metadata():
-                    created = _parse_time(md.get("create_time", ""))
-                    if not created or created < cutoff:
-                        continue
-                    cid = md.get("content_id") or md.get("video_id")
-                    if cid:
-                        recent_content_ids.add((src.id, cid))
+            global_ids = GroupContentRepo(s).list_global_ids_by_group(group.id, limit=1000)
+            recent_content_count = 0
+            if global_ids:
+                from sqlmodel import select
+                items = s.exec(select(GlobalContent).where(GlobalContent.id.in_(global_ids))).all()
+                for item in items:
+                    created = _parse_time(item.create_time)
+                    if created and created >= cutoff:
+                        recent_content_count += 1
+            else:
+                recent_content_ids: set[tuple[int, str]] = set()
+                for src in sources:
+                    for md in StorageManager(src.directory).list_metadata():
+                        created = _parse_time(md.get("create_time", ""))
+                        if not created or created < cutoff:
+                            continue
+                        cid = md.get("content_id") or md.get("video_id")
+                        if cid:
+                            recent_content_ids.add((src.id, cid))
+                recent_content_count = len(recent_content_ids)
             recent_signals = []
             for sig in signal_repo.list_by_group(group.id, limit=1000):
                 created = _parse_time(sig.created_at)
@@ -95,7 +108,7 @@ def list_group_summaries(
                     recent_signals.append(sig)
             out.append(GroupSummaryResp(
                 **_to_resp(group, group_repo.source_count(group.id)).model_dump(),
-                recent_content_count=len(recent_content_ids),
+                recent_content_count=recent_content_count,
                 recent_signal_count=len(recent_signals),
                 recent_new_signal_count=sum(1 for sig in recent_signals if sig.is_new),
                 failed_source_count=failed_source_count,

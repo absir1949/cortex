@@ -43,6 +43,7 @@ class SignalService:
         comments: Optional[list[dict]] = None,
         create_time: Optional[str] = None,
         raise_on_failure: bool = False,
+        global_content_id: Optional[int] = None,
     ) -> Optional[dict]:
         """判定一条内容的观点新旧。
 
@@ -107,6 +108,7 @@ class SignalService:
             SignalRepo(s).create(
                 source_id=source.id,
                 content_id=content_id,
+                global_content_id=global_content_id,
                 group_id=source.group_id,
                 is_new=is_new,
                 summary=summary,

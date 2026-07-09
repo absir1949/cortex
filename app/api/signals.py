@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.auth import get_current_user
 from app.authz import assert_group_owner, owned_group_ids
 from app.db.engine import get_session
-from app.db.repos import SignalRepo, GroupRepo, SourceRepo
+from app.db.repos import SignalRepo, SourceRepo
+from app.db.schema import GlobalContent, Source, SourceContent
 from app.services import config_service
 from app.storage.fs import StorageManager
 
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/api", tags=["signals"])
 def _to_brief(sig) -> dict:
     return {
         "id": sig.id,
+        "global_content_id": sig.global_content_id,
         "group_id": sig.group_id,
         "source_id": sig.source_id,
         "content_id": sig.content_id,
@@ -27,7 +29,7 @@ def _to_brief(sig) -> dict:
     }
 
 
-def _enrich_with_content(signals: list, sources: dict) -> list:
+def _enrich_with_content(signals: list, sources: dict, group_id: int | None = None) -> list:
     """给信号列表附加 source_name/platform/url/title/group_name"""
     # 批量查 group_name（一次 IN 查询，避免 N+1）
     group_ids = {src.group_id for src in sources.values() if src.group_id}
@@ -39,17 +41,38 @@ def _enrich_with_content(signals: list, sources: dict) -> list:
             rows = s.exec(select(KnowledgeGroup).where(KnowledgeGroup.id.in_(group_ids))).all()
             group_names = {r.id: r.name for r in rows}
 
+    global_ids = [sig.global_content_id for sig in signals if getattr(sig, "global_content_id", None)]
+    global_map: dict[int, GlobalContent] = {}
+    source_for_global: dict[int, object] = {}
+    if global_ids:
+        with get_session() as s:
+            from sqlmodel import select
+            rows = s.exec(select(GlobalContent).where(GlobalContent.id.in_(global_ids))).all()
+            global_map = {r.id: r for r in rows if r.id is not None}
+            if group_id is not None:
+                linked = s.exec(
+                    select(SourceContent.global_content_id, Source)
+                    .join(Source, Source.id == SourceContent.source_id)
+                    .where(Source.group_id == group_id)
+                    .where(SourceContent.global_content_id.in_(global_ids))
+                ).all()
+                source_for_global = {gid: src for gid, src in linked}
+
     storage_cache: dict[int, StorageManager] = {}
     out = []
     for sig in signals:
         d = _to_brief(sig)
-        src = sources.get(sig.source_id)
+        src = source_for_global.get(sig.global_content_id) or sources.get(sig.source_id)
         d["source_name"] = src.display_name if src else ""
-        d["platform"] = src.platform if src else ""
+        global_item = global_map.get(sig.global_content_id)
+        d["platform"] = global_item.platform if global_item else (src.platform if src else "")
         d["group_name"] = group_names.get(src.group_id, "") if src else ""
         # 读 url/title
         url, title = "", ""
-        if src:
+        if global_item:
+            url = global_item.url
+            title = global_item.title
+        elif src:
             if src.id not in storage_cache:
                 storage_cache[src.id] = StorageManager(src.directory)
             md = storage_cache[src.id].get_metadata(sig.content_id)
@@ -89,7 +112,7 @@ def list_group_signals(
         assert_group_owner(s, group_id, current_user)
         signals = SignalRepo(s).list_by_group(group_id, is_new=is_new, limit=limit)
         sources = {src.id: src for src in SourceRepo(s).list_by_group(group_id)}
-    return _enrich_with_content(signals, sources)
+    return _enrich_with_content(signals, sources, group_id=group_id)
 
 
 @router.get("/groups/{group_id}/signals/stats")

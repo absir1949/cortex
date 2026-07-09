@@ -13,6 +13,7 @@ class SourceType(str, Enum):
 
 class TaskKind(str, Enum):
     INGEST = "ingest"                        # 定时订阅采集
+    INGEST_TARGET = "ingest_target"          # 共享采集目标级刷新
     RESEARCH = "research"                    # 按需研究
     TRANSCRIBE_BACKFILL = "transcribe_backfill"
     ANALYZE = "analyze"                      # 仅生成报告（基于已采集的信号，不重新采集）

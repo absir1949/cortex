@@ -10,6 +10,7 @@ from .creator_repo import CreatorRepo
 from .content_repo import ContentRepo
 from .refresh_run_repo import RefreshRunRepo
 from .user_repo import UserRepo
+from .shared_ingest_repo import GlobalContentRepo, GroupContentRepo, IngestTargetRepo, SourceContentRepo
 
 __all__ = [
     "GroupRepo",
@@ -23,4 +24,8 @@ __all__ = [
     "ContentRepo",
     "RefreshRunRepo",
     "UserRepo",
+    "GlobalContentRepo",
+    "GroupContentRepo",
+    "IngestTargetRepo",
+    "SourceContentRepo",
 ]

@@ -39,7 +39,7 @@ export interface GroupDetail extends Group {
 }
 
 export type TaskStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'canceled'
-export type TaskKind = 'ingest' | 'research' | 'transcribe_backfill'
+export type TaskKind = 'ingest' | 'ingest_target' | 'research' | 'transcribe_backfill'
 
 export interface Task {
   id: string
@@ -101,6 +101,7 @@ export interface SchedulerJob {
 
 export interface Signal {
   id: number
+  global_content_id?: number | null
   group_id: number | null
   source_id: number
   content_id: string

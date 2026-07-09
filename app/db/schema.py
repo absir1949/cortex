@@ -298,6 +298,7 @@ class Signal(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("source_id", "content_id", name="uq_signal_content"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    global_content_id: Optional[int] = Field(default=None, foreign_key="global_content.id", index=True)
     group_id: Optional[int] = Field(default=None, foreign_key="knowledge_groups.id", index=True)
     source_id: int = Field(foreign_key="sources.id", index=True)
     content_id: str = Field(index=True)

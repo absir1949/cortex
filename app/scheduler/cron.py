@@ -1,9 +1,9 @@
-"""APScheduler 按组触发定时订阅
+"""APScheduler 按共享采集目标触发定时订阅
 
 逻辑：
-- 为每个启用的知识组注册一个 interval job，间隔 = group.defaults.interval_hours 或系统默认
-- 触发时向 TaskRunner 提交 ingest 任务（异步执行）
-- 启动时自动 schedule 所有启用的组
+- 注册一个固定扫描 job
+- 扫描 due 的 IngestTarget，向 TaskRunner 提交 ingest_target 任务
+- 采集目标内部会把新内容分发给所有订阅它的专题
 """
 from __future__ import annotations
 from typing import Optional
@@ -12,8 +12,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.db.engine import get_session
-from app.db.repos import GroupRepo
-from app.services import config_service
+from app.db.repos import IngestTargetRepo
 from app.models.group import TaskKind
 
 
@@ -40,22 +39,13 @@ class CortexScheduler:
         for job in self.scheduler.get_jobs():
             job.remove()
 
-        with get_session() as s:
-            groups = GroupRepo(s).list_all()
-
-        for g in groups:
-            if not g.enabled:
-                continue
-            cfg = config_service.effective_for_group(g.id)
-            hours = int(cfg.get("interval_hours", 48))
-            self.scheduler.add_job(
-                _ingest_group_entry,
-                trigger=IntervalTrigger(hours=hours),
-                id=f"group_{g.id}",
-                name=f"{g.name} ({hours}h)",
-                args=[g.id],
-                replace_existing=True,
-            )
+        self.scheduler.add_job(
+            _scan_ingest_targets_entry,
+            trigger=IntervalTrigger(minutes=15),
+            id="target_scan",
+            name="共享采集目标扫描 (15m)",
+            replace_existing=True,
+        )
 
     def list_jobs(self) -> list[dict]:
         out = []
@@ -65,14 +55,17 @@ class CortexScheduler:
         return out
 
 
-def _ingest_group_entry(group_id: int) -> None:
-    """APScheduler 触发时，向 TaskRunner 提交 ingest 任务"""
+def _scan_ingest_targets_entry() -> None:
+    """APScheduler 触发时，扫描 due 的 IngestTarget 并提交任务。"""
     from app.tasks.runner import get_runner
-    get_runner().enqueue(
-        TaskKind.INGEST,
-        params={"group_id": group_id, "force": False, "analyze": True},
-        group_id=group_id,
-    )
+    with get_session() as s:
+        targets = IngestTargetRepo(s).due_targets(limit=20)
+    runner = get_runner()
+    for target in targets:
+        runner.enqueue(
+            TaskKind.INGEST_TARGET,
+            params={"target_id": target.id, "force": False},
+        )
 
 
 _scheduler: Optional[CortexScheduler] = None

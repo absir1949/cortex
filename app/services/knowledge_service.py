@@ -5,15 +5,16 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from sqlmodel import select
 
 from app.db.engine import get_session
-from app.db.repos import GroupRepo, SourceRepo, AnalyzedRepo, ReportRepo, SignalRepo
-from app.db.schema import Report
+from app.db.repos import AnalyzedRepo, GroupContentRepo, GroupRepo, ReportRepo, SignalRepo, SourceContentRepo, SourceRepo
+from app.db.schema import GlobalContent, Report
 from app.llm import OpenAICompatClient, LLMMessage
 from app.models.group import ReportKind
 from app.services import config_service
 from app.storage import paths
-from app.storage.fs import StorageManager
+from app.storage.fs import GlobalStorage, StorageManager
 
 
 # 单次喂给 LLM 的文本上限
@@ -45,9 +46,11 @@ class KnowledgeService:
 
         analyzed_results: list[dict] = []
         total_new = 0
+        consumed_global_ids: list[int] = []
+        global_buckets, has_group_content = self._collect_new_group_items(group_id, sources)
 
         for source in sources:
-            new_items = self._collect_new_items(source)
+            new_items = global_buckets.get(source.id, []) if has_group_content else self._collect_new_items(source)
             if not new_items:
                 continue
 
@@ -76,11 +79,14 @@ class KnowledgeService:
                 "source_id": source.id,
             })
             # 标记已分析（只有 analysis 成功才标记）
-            with get_session() as s:
-                AnalyzedRepo(s).mark_many(
-                    source.id,
-                    [it["content_id"] for it in new_items],
-                )
+            if has_group_content:
+                consumed_global_ids.extend([int(it["global_content_id"]) for it in new_items if it.get("global_content_id")])
+            else:
+                with get_session() as s:
+                    AnalyzedRepo(s).mark_many(
+                        source.id,
+                        [it["content_id"] for it in new_items],
+                    )
             total_new += new_signal_count
 
         if not analyzed_results:
@@ -116,10 +122,13 @@ class KnowledgeService:
                 content_json_path=str(report_json_path),
                 sources_used=[{"source_id": r["source_id"], "new_count": r["new_count"]} for r in analyzed_results],
             ))
+            report_id = report.id
+            if consumed_global_ids:
+                GroupContentRepo(s).mark_analyzed(group_id, consumed_global_ids)
 
         return {
             "creators": analyzed_results,
-            "report_id": report.id,
+            "report_id": report_id,
             "report_path": str(report_md),
         }
 
@@ -161,13 +170,21 @@ class KnowledgeService:
             source_map = {src.id: src for src in sources}
             signals = SignalRepo(s).list_by_group(group_id, limit=500)
 
-        evidence_pool = self._collect_group_evidence(
+        evidence_pool = self._collect_group_evidence_global(
+            group_id,
             source_map,
-            signals,
             question=question,
             days=days,
             limit=limit,
         )
+        if not evidence_pool:
+            evidence_pool = self._collect_group_evidence(
+                source_map,
+                signals,
+                question=question,
+                days=days,
+                limit=limit,
+            )
         if not evidence_pool:
             return {
                 "answer": "这个专题里还没有可用于回答的转录、评论或观点信号。先刷新专题，等内容进入知识库后再问会更准。",
@@ -200,6 +217,8 @@ class KnowledgeService:
             "evidence": [
                 {
                     "content_id": ev.get("content_id", ""),
+                    "global_content_id": ev.get("global_content_id"),
+                    "platform": ev.get("platform", ""),
                     "source_id": ev.get("source_id", 0),
                     "author": ev.get("author", ""),
                     "title": ev.get("title", ""),
@@ -328,6 +347,132 @@ class KnowledgeService:
         positive = [ev for ev in candidates if ev["score"] > 0]
         selected = positive[:limit] if positive else candidates[:limit]
         return selected
+
+    def _collect_group_evidence_global(
+        self,
+        group_id: int,
+        source_map: dict[int, object],
+        *,
+        question: str,
+        days: int,
+        limit: int,
+    ) -> list[dict]:
+        terms = self._question_terms(question)
+        cutoff = datetime.now() - timedelta(days=days)
+        candidates: list[dict] = []
+        with get_session() as s:
+            global_ids = GroupContentRepo(s).list_global_ids_by_group(group_id, limit=1000)
+            if not global_ids:
+                return []
+            global_items = s.exec(select(GlobalContent).where(GlobalContent.id.in_(global_ids))).all()
+            source_content_repo = SourceContentRepo(s)
+            for global_item in global_items:
+                created = self._parse_time(global_item.create_time)
+                if created and created < cutoff:
+                    continue
+                sig = SignalRepo(s).get_by_content(
+                    0,
+                    global_item.content_id,
+                    global_content_id=global_item.id,
+                )
+                linked_sources = source_content_repo.sources_for_global_in_group(group_id, global_item.id)
+                source = linked_sources[0] if linked_sources else None
+                if source is None:
+                    continue
+                storage = GlobalStorage(global_item.platform, global_item.creator_id)
+                transcript = storage.get_transcript(global_item.content_id) or ""
+                comments = storage.get_comments(global_item.content_id) or []
+                if not transcript and not comments and not sig:
+                    continue
+
+                comment_text = "\n".join((c.get("text", "") or "") for c in comments[:12])
+                signal_summary = sig.summary if sig else ""
+                new_points = list(sig.new_points or []) if sig else []
+                searchable = "\n".join([
+                    global_item.title,
+                    signal_summary,
+                    "\n".join(new_points),
+                    transcript,
+                    comment_text,
+                ]).lower()
+                term_score = sum(1 for t in terms if t and t in searchable)
+                signal_score = 2 if sig and sig.is_new else (1 if sig else 0)
+                recency_score = 0
+                if created:
+                    age_days = max(0, (datetime.now() - created).days)
+                    recency_score = max(0, days - age_days) / max(days, 1)
+                score = term_score * 3 + signal_score + recency_score
+                if not terms:
+                    score += recency_score
+
+                snippet_source = transcript or comment_text or signal_summary
+                candidates.append({
+                    "score": score,
+                    "global_content_id": global_item.id,
+                    "platform": global_item.platform,
+                    "content_id": global_item.content_id,
+                    "source_id": source.id,
+                    "author": source.display_name,
+                    "title": global_item.title,
+                    "url": global_item.url,
+                    "create_time": global_item.create_time,
+                    "transcript": transcript,
+                    "comments": comments,
+                    "signal_summary": signal_summary,
+                    "new_points": new_points,
+                    "snippet": snippet_source[:220].replace("\n", " "),
+                })
+
+        candidates.sort(key=lambda ev: (ev["score"], ev.get("create_time", "")), reverse=True)
+        positive = [ev for ev in candidates if ev["score"] > 0]
+        return positive[:limit] if positive else candidates[:limit]
+
+    def _collect_new_group_items(self, group_id: int, sources: list) -> tuple[dict[int, list[dict]], bool]:
+        """从 GroupContent 水位收集本专题未分析内容，并按 source 分桶。
+
+        返回第二个 bool 表示新水位表是否已有数据；没有数据时调用方回退旧链路。
+        """
+        with get_session() as s:
+            group_contents = GroupContentRepo(s).list_unanalyzed_by_group(group_id, limit=500)
+            if not group_contents:
+                existing_ids = GroupContentRepo(s).list_global_ids_by_group(group_id, limit=1)
+                return {}, bool(existing_ids)
+            source_content_repo = SourceContentRepo(s)
+            source_by_id = {src.id: src for src in sources}
+            buckets: dict[int, list[dict]] = {}
+            for group_content in group_contents:
+                global_item = s.get(GlobalContent, group_content.global_content_id)
+                if not global_item:
+                    continue
+                sig = SignalRepo(s).get_by_content(
+                    0,
+                    global_item.content_id,
+                    global_content_id=global_item.id,
+                )
+                if sig is None:
+                    continue
+                linked_sources = source_content_repo.sources_for_global_in_group(group_id, global_item.id)
+                source = linked_sources[0] if linked_sources else None
+                if source is None or source.id not in source_by_id:
+                    continue
+                storage = GlobalStorage(global_item.platform, global_item.creator_id)
+                transcript = storage.get_transcript(global_item.content_id)
+                if not transcript:
+                    continue
+                buckets.setdefault(source.id, []).append({
+                    "global_content_id": global_item.id,
+                    "content_id": global_item.content_id,
+                    "title": global_item.title,
+                    "transcript": transcript,
+                    "comments": storage.get_comments(global_item.content_id) or [],
+                    "create_time": global_item.create_time,
+                    "has_signal": True,
+                    "is_new_signal": bool(sig.is_new),
+                    "signal_summary": sig.summary,
+                    "signal_new_points": list(sig.new_points or []),
+                    "signal_matched_points": list(sig.matched_points or []),
+                })
+        return buckets, True
 
     @classmethod
     def _build_group_ask_prompt(cls, question: str, evidence: list[dict]) -> str:

@@ -5,9 +5,9 @@ from fastapi.responses import PlainTextResponse
 from app.auth import get_current_user
 from app.authz import assert_content_owner
 from app.db.engine import get_session
-from app.db.schema import Source
+from app.db.schema import ContentItem, GlobalContent, Source
 from app.storage.cache import ContentCache
-from app.storage.fs import StorageManager
+from app.storage.fs import GlobalStorage, StorageManager
 
 
 router = APIRouter(prefix="/api/contents", tags=["contents"])
@@ -24,6 +24,18 @@ def _get_cached_transcript(platform: str, content_id: str, source_directory: str
     text = None
     if source_directory:
         text = StorageManager(source_directory).get_transcript(content_id)
+    if not text:
+        text = ContentCache().get_transcript(platform, content_id)
+    if text:
+        _transcript_cache[key] = text
+    return text
+
+
+def _get_cached_global_transcript(platform: str, content_id: str, creator_id: int | None = None):
+    key = (platform, content_id)
+    if key in _transcript_cache:
+        return _transcript_cache[key]
+    text = GlobalStorage(platform, creator_id).get_transcript(content_id)
     if not text:
         text = ContentCache().get_transcript(platform, content_id)
     if text:
@@ -54,9 +66,12 @@ def get_transcript(
             content_id=content_id,
             current_user=current_user,
         )
-        source = s.get(Source, item.source_id)
-        source_directory = source.directory if source else None
-    text = _get_cached_transcript(platform, content_id, source_directory)
+        if isinstance(item, GlobalContent):
+            text = _get_cached_global_transcript(platform, content_id, item.creator_id)
+        else:
+            source = s.get(Source, item.source_id)
+            source_directory = source.directory if source else None
+            text = _get_cached_transcript(platform, content_id, source_directory)
     if not text:
         raise HTTPException(404, "transcript not found")
     return text

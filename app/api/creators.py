@@ -2,13 +2,15 @@ from __future__ import annotations
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
+from sqlmodel import select
 
 from app.auth import get_current_user
 from app.authz import assert_source_owner
 from app.db.engine import get_session
-from app.db.repos import CreatorRepo, SourceRepo, GroupRepo, SignalRepo
+from app.db.repos import CreatorRepo, SignalRepo
+from app.db.schema import GlobalContent, Signal, SourceContent
 from app.storage import paths
-from app.storage.fs import StorageManager
+from app.storage.fs import GlobalStorage
 
 
 router = APIRouter(prefix="/api", tags=["creators"])
@@ -57,43 +59,36 @@ def list_source_contents(
     with get_session() as s:
         src = assert_source_owner(s, group_id, source_id, current_user)
 
-    storage = StorageManager(src.directory)
-    mds = storage.list_metadata()  # 已按 create_time 倒序
-    page_mds = mds[offset:offset + limit]
-    # 按本页 content_id 精确查信号（避免全量拉取 + 500 上限漏标）
-    page_cids = [md.get("content_id") or md.get("video_id") for md in page_mds]
-    page_cids = [c for c in page_cids if c]
-    sig_map: dict[str, object] = {}
-    if page_cids:
-        with get_session() as s:
-            from sqlmodel import select
-            from app.db.schema import Signal
-            rows = s.exec(
-                select(Signal).where(
-                    Signal.source_id == source_id,
-                    Signal.content_id.in_(page_cids),
-                )
-            ).all()
-            sig_map = {r.content_id: r for r in rows}
+    with get_session() as s:
+        all_rows = s.exec(
+            select(GlobalContent)
+            .join(SourceContent, SourceContent.global_content_id == GlobalContent.id)
+            .where(SourceContent.source_id == source_id)
+            .order_by(GlobalContent.create_time.desc())
+        ).all()
+        total = len(all_rows)
+        page_rows = all_rows[offset:offset + limit]
+        global_ids = [row.id for row in page_rows if row.id is not None]
+        sig_rows = s.exec(select(Signal).where(Signal.global_content_id.in_(global_ids))).all() if global_ids else []
+        sig_map = {r.global_content_id: r for r in sig_rows}
 
     out = []
-    for md in page_mds:
-        cid = md.get("content_id") or md.get("video_id")
-        if not cid:
-            continue
-        sig = sig_map.get(cid)
+    for item in page_rows:
+        sig = sig_map.get(item.id)
+        storage = GlobalStorage(item.platform, item.creator_id)
         out.append({
-            "content_id": cid,
-            "title": md.get("title", ""),
-            "url": md.get("url", ""),
-            "create_time": md.get("create_time", ""),
-            "platform": md.get("platform", src.platform),
-            "statistics": md.get("statistics", {}),
-            "transcribed": bool(md.get("transcribed")),
+            "global_content_id": item.id,
+            "content_id": item.content_id,
+            "title": item.title,
+            "url": item.url,
+            "create_time": item.create_time,
+            "platform": item.platform,
+            "statistics": item.statistics or {},
+            "transcribed": bool(storage.get_transcript(item.content_id)),
             "is_new_signal": bool(sig and sig.is_new) if sig else None,  # None=未判定
             "signal_summary": sig.summary if sig else "",
         })
-    return {"items": out, "total": len(mds)}
+    return {"items": out, "total": total}
 
 
 @router.get("/groups/{group_id}/sources/{source_id}/signals")
@@ -106,10 +101,22 @@ def list_source_signals(
     """博主的信号历史（新观点时间线）"""
     with get_session() as s:
         assert_source_owner(s, group_id, source_id, current_user)
-        signals = SignalRepo(s).list_by_source(source_id, limit=limit)
+        global_ids = s.exec(
+            select(SourceContent.global_content_id)
+            .where(SourceContent.source_id == source_id)
+            .order_by(SourceContent.id.desc())
+            .limit(limit)
+        ).all()
+        signals = s.exec(
+            select(Signal)
+            .where(Signal.global_content_id.in_([int(i) for i in global_ids]))
+            .order_by(Signal.created_at.desc())
+            .limit(limit)
+        ).all() if global_ids else SignalRepo(s).list_by_source(source_id, limit=limit)
     return [
         {
             "id": sig.id,
+            "global_content_id": sig.global_content_id,
             "content_id": sig.content_id,
             "is_new": sig.is_new,
             "summary": sig.summary,

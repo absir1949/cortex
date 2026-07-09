@@ -8,11 +8,31 @@ from app.tasks.runner import TaskContext
 from app.db.schema import Task
 
 
+@register_handler(TaskKind.INGEST_TARGET)
+def handle_ingest_target(task: Task, ctx: TaskContext) -> dict:
+    """共享采集目标级任务。params: {"target_id": int, "force": bool, "days": int?}"""
+    params = task.params or {}
+    target_id = params.get("target_id")
+    if not target_id:
+        raise ValueError("target_id required")
+    force = bool(params.get("force", False))
+    days_override = params.get("days")
+    ctx.log(f"开始采集目标 {target_id}" + (f"（回看 {days_override} 天）" if days_override else ""))
+    return IngestService().refresh_target(
+        int(target_id),
+        log_cb=lambda m: ctx.log(m),
+        is_cancelled=ctx.is_cancelled,
+        force=force,
+        days_override=days_override,
+        task_id=ctx.task_id,
+    )
+
+
 @register_handler(TaskKind.INGEST)
 def handle_ingest(task: Task, ctx: TaskContext) -> dict:
     """
     params:
-      {"group_id": int, "force": bool, "analyze": bool, "source_id": int?}
+      {"group_id": int, "force": bool, "analyze": bool, "source_id": int?, "target_id": int?}
 
     如果指定 source_id，只跑该源；否则跑整个组。
     analyze=True 时采集完触发知识提炼（仅 group 模式）。
@@ -20,10 +40,22 @@ def handle_ingest(task: Task, ctx: TaskContext) -> dict:
     params = task.params or {}
     group_id = params.get("group_id") or task.group_id
     source_id = params.get("source_id") or task.source_id
+    target_id = params.get("target_id")
     force = bool(params.get("force", False))
     analyze = bool(params.get("analyze", True))
 
     svc = IngestService()
+
+    if target_id:
+        ctx.log(f"开始采集目标 {target_id}")
+        return svc.refresh_target(
+            int(target_id),
+            log_cb=lambda m: ctx.log(m),
+            is_cancelled=ctx.is_cancelled,
+            force=force,
+            days_override=params.get("days"),
+            task_id=ctx.task_id,
+        )
 
     if source_id:
         from app.services.source_service import SourceService

@@ -52,6 +52,18 @@ button:disabled {
   @apply flex items-center gap-5;
 }
 
+.account-chip {
+  @apply flex items-center gap-3 rounded-md border border-border bg-bg px-3 py-2 text-xs text-muted;
+}
+
+.account-chip span {
+  @apply max-w-32 truncate;
+}
+
+.account-chip button {
+  @apply font-semibold text-text transition-colors hover:text-accent;
+}
+
 .top-nav-item {
   @apply border-b-2 border-transparent py-2 text-sm text-muted transition-colors hover:text-text;
 }
@@ -62,6 +74,84 @@ button:disabled {
 
 .app-main {
   @apply max-w-6xl mx-auto px-5 py-8;
+}
+
+.auth-page {
+  @apply min-h-screen px-5 py-8;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(180deg, rgba(248, 247, 242, 0.96), rgba(239, 243, 236, 0.92)),
+    #f8f7f2;
+}
+
+.auth-panel {
+  @apply w-full max-w-md rounded-lg border border-border bg-panel p-8;
+  box-shadow: 0 24px 80px rgba(32, 33, 31, 0.08);
+}
+
+.auth-brand {
+  @apply flex items-center gap-3;
+}
+
+.auth-brand strong {
+  @apply block text-lg leading-tight;
+}
+
+.auth-brand small {
+  @apply block text-xs text-muted mt-0.5;
+}
+
+.auth-copy {
+  @apply mt-10 border-l-4 border-accent pl-4 text-2xl font-semibold text-text;
+}
+
+.auth-tabs {
+  @apply mt-8 grid grid-cols-2 rounded-md border border-border p-1;
+}
+
+.auth-tabs button {
+  @apply rounded px-3 py-2 text-sm font-semibold text-muted transition-colors;
+}
+
+.auth-tabs button.active {
+  @apply bg-text text-white;
+}
+
+.auth-form {
+  @apply mt-6 space-y-4;
+}
+
+.auth-form label {
+  @apply block text-sm font-semibold text-text;
+}
+
+.auth-form input {
+  @apply mt-2 w-full rounded-md border border-border bg-bg px-4 py-3 text-sm text-text outline-none transition-colors focus:border-accent;
+}
+
+.auth-code-row {
+  @apply flex gap-2;
+}
+
+.auth-code-row input {
+  @apply min-w-0 flex-1;
+}
+
+.auth-code-row button {
+  @apply mt-2 shrink-0 rounded-md border border-border px-4 text-sm font-semibold text-text transition-colors hover:border-accent hover:text-accent;
+}
+
+.auth-submit {
+  @apply w-full rounded-md bg-text px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent;
+}
+
+.auth-error {
+  @apply rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger;
+}
+
+.auth-loading {
+  @apply grid min-h-screen place-items-center text-sm text-muted;
 }
 
 /* 通用组件样式 */

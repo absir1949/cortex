@@ -365,7 +365,7 @@ function AskMessageBubble({ message }: { message: AskMessage }) {
           </button>
           {evidenceOpen && message.evidence.map((ev) => (
             <a
-              key={`${ev.source_id}-${ev.content_id}`}
+              key={`${ev.platform || 'content'}-${ev.global_content_id || ev.content_id}`}
               href={ev.url || undefined}
               target="_blank"
               rel="noreferrer"

@@ -1,4 +1,5 @@
-import { NavLink, Route, Routes } from 'react-router-dom'
+import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
+import type { ReactNode } from 'react'
 import Dashboard from './pages/Dashboard'
 import Topics from './pages/Topics'
 import GroupLayout from './layouts/GroupLayout'
@@ -10,6 +11,8 @@ import TaskProgress from './pages/TaskProgress'
 import ReportView from './pages/ReportView'
 import Settings from './pages/Settings'
 import TasksList from './pages/TasksList'
+import Login from './pages/Login'
+import { useAuth } from './auth/AuthContext'
 
 function NavItem({ to, label }: { to: string; label: string }) {
   return (
@@ -24,6 +27,36 @@ function NavItem({ to, label }: { to: string; label: string }) {
 }
 
 export default function App() {
+  const auth = useAuth()
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/*" element={<RequireAuth><AppShell isAdmin={auth.isAdmin} userLabel={auth.user?.nickname || auth.user?.phone || ''} onLogout={auth.logout} /></RequireAuth>} />
+    </Routes>
+  )
+}
+
+function RequireAuth({ children }: { children: ReactNode }) {
+  const auth = useAuth()
+  const location = useLocation()
+  if (auth.isLoading) {
+    return <div className="auth-loading">正在进入听风...</div>
+  }
+  if (!auth.isAuthenticated) {
+    return <Navigate to="/login" replace state={{ from: location }} />
+  }
+  return <>{children}</>
+}
+
+function AppShell({
+  isAdmin,
+  userLabel,
+  onLogout,
+}: {
+  isAdmin: boolean
+  userLabel: string
+  onLogout: () => void
+}) {
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -38,8 +71,12 @@ export default function App() {
           <nav className="top-nav">
             <NavItem to="/" label="今日" />
             <NavItem to="/topics" label="专题" />
-            <NavItem to="/settings" label="设置" />
+            {isAdmin && <NavItem to="/settings" label="设置" />}
           </nav>
+          <div className="account-chip">
+            <span>{userLabel}</span>
+            <button type="button" onClick={onLogout}>退出</button>
+          </div>
         </div>
       </header>
 
@@ -56,7 +93,8 @@ export default function App() {
           <Route path="/tasks" element={<TasksList />} />
           <Route path="/tasks/:id" element={<TaskProgress />} />
           <Route path="/reports/:id" element={<ReportView />} />
-          <Route path="/settings" element={<Settings />} />
+          {isAdmin && <Route path="/settings" element={<Settings />} />}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
     </div>

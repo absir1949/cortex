@@ -6,7 +6,7 @@ from app.api.schemas import SourceCreateReq, SourceUpdateReq, SourceBrief, Sourc
 from app.auth import get_current_user
 from app.authz import assert_group_owner, assert_source_owner
 from app.db.engine import get_session
-from app.db.repos import SignalRepo
+from app.db.schema import GlobalContent, Signal, SourceContent
 from app.services.source_service import SourceService
 from app.models.group import TaskKind
 from app.storage.fs import StorageManager
@@ -55,17 +55,35 @@ def list_source_summaries(
     cutoff = datetime.now() - timedelta(days=days)
     out: list[SourceSummary] = []
     with get_session() as s:
-        signal_repo = SignalRepo(s)
+        from sqlmodel import select
         for src in sources:
-            metadata = StorageManager(src.directory).list_metadata()
-            recent_cids: set[str] = set()
-            for md in metadata:
-                created = _parse_time(md.get("create_time", ""))
+            items = s.exec(
+                select(GlobalContent)
+                .join(SourceContent, SourceContent.global_content_id == GlobalContent.id)
+                .where(SourceContent.source_id == src.id)
+            ).all()
+            recent_global_ids: set[int] = set()
+            for item in items:
+                created = _parse_time(item.create_time)
                 if created and created >= cutoff:
-                    cid = md.get("content_id") or md.get("video_id")
-                    if cid:
-                        recent_cids.add(cid)
-            signals = signal_repo.list_by_source(src.id, limit=500)
+                    recent_global_ids.add(item.id)
+            if recent_global_ids:
+                signals = s.exec(
+                    select(Signal).where(Signal.global_content_id.in_(list(recent_global_ids)))
+                ).all()
+                recent_content_count = len(recent_global_ids)
+            else:
+                recent_cids: set[str] = set()
+                for md in StorageManager(src.directory).list_metadata():
+                    created = _parse_time(md.get("create_time", ""))
+                    if created and created >= cutoff:
+                        cid = md.get("content_id") or md.get("video_id")
+                        if cid:
+                            recent_cids.add(cid)
+                signals = s.exec(
+                    select(Signal).where(Signal.source_id == src.id)
+                ).all()
+                recent_content_count = len(recent_cids)
             recent_signals = []
             for sig in signals:
                 created = _parse_time(sig.created_at)
@@ -73,7 +91,7 @@ def list_source_summaries(
                     recent_signals.append(sig)
             out.append(SourceSummary(
                 **_to_brief(src).model_dump(),
-                recent_content_count=len(recent_cids),
+                recent_content_count=recent_content_count,
                 recent_signal_count=len(recent_signals),
                 recent_new_signal_count=sum(1 for sig in recent_signals if sig.is_new),
                 window_days=days,
