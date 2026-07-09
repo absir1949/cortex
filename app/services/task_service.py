@@ -21,3 +21,14 @@ class TaskService:
     ) -> list[Task]:
         with get_session() as s:
             return TaskRepo(s).list(kind=kind, status=status, limit=limit)
+
+    def list_by_group_ids(
+        self,
+        group_ids: list[int],
+        *,
+        kind: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[Task]:
+        with get_session() as s:
+            return TaskRepo(s).list_by_group_ids(group_ids, kind=kind, status=status, limit=limit)

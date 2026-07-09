@@ -137,6 +137,164 @@ def _mig_006_ask_conversations(session: Session) -> None:
     SQLModel.metadata.create_all(get_engine())
 
 
+# ============ Migration 007: 用户 + 多租户 + 共享采集表骨架 ============
+# 这是上线前最大的 schema 变更：
+#   1. users 表（认证）
+#   2. knowledge_groups 加 owner_id + slug 改联合唯一（SQLite 需重建表）
+#   3. global_content / source_content / group_content / ingest_targets（共享采集表骨架）
+#
+# 注意：SQLite 不支持直接 DROP CONSTRAINT / 改 UNIQUE。
+# slug 从 unique=True → (owner_id, slug) 联合唯一，需重建 knowledge_groups 表。
+
+@register(7, "007_go_live: 用户表 + 多租户 owner_id + 共享采集表骨架")
+def _mig_007_go_live(session: Session) -> None:
+    from sqlalchemy import text, inspect
+    engine = get_engine()
+
+    # --- 1. 建新表（create_all 幂等，已存在的跳过）---
+    SQLModel.metadata.create_all(engine)
+    admin_id = _ensure_admin_user(session)
+
+    # --- 2. knowledge_groups: 加 owner_id 列 ---
+    inspector = inspect(engine)
+    kg_cols = {c["name"] for c in inspector.get_columns("knowledge_groups")}
+    if "owner_id" not in kg_cols:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE knowledge_groups ADD COLUMN owner_id INTEGER REFERENCES users(id)"
+            ))
+            conn.commit()
+
+    # 先回填 owner_id，再改唯一约束，避免 nullable owner_id 让 slug 唯一性失真。
+    session.execute(text(
+        "UPDATE knowledge_groups SET owner_id = :admin_id WHERE owner_id IS NULL"
+    ), {"admin_id": admin_id})
+    session.commit()
+
+    # --- 3. knowledge_groups: slug 唯一约束从 global → (owner_id, slug) ---
+    # SQLite 自动 UNIQUE 索引不能 DROP INDEX；旧库若是 UNIQUE(slug)，只能重建表。
+    if _has_unique_index(engine, "knowledge_groups", ("slug",)):
+        _rebuild_knowledge_groups_drop_slug_unique(engine)
+
+    # 如果联合唯一索引不存在（全新表或刚重建），创建它。
+    if not _has_unique_index(engine, "knowledge_groups", ("owner_id", "slug")):
+        with engine.connect() as conn:
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_group_owner_slug "
+                "ON knowledge_groups (owner_id, slug)"
+            ))
+            conn.commit()
+
+    # --- 4. 再次回填 owner_id（幂等，防止重建前后连接状态差异） ---
+    session.execute(text(
+        "UPDATE knowledge_groups SET owner_id = :admin_id WHERE owner_id IS NULL"
+    ), {"admin_id": admin_id})
+    session.commit()
+
+
+def _ensure_admin_user(session: Session) -> int:
+    from sqlalchemy import text
+    from app.settings import settings
+
+    admin_phone = getattr(settings, "admin_phone", None) or "00000000000"
+    existing_admin = session.execute(
+        text("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
+    ).first()
+    if existing_admin:
+        return int(existing_admin[0])
+
+    existing_phone = session.execute(
+        text("SELECT id FROM users WHERE phone = :phone LIMIT 1"),
+        {"phone": admin_phone},
+    ).first()
+    if existing_phone:
+        session.execute(text(
+            "UPDATE users SET role = 'admin', plan = 'pro' WHERE id = :id"
+        ), {"id": existing_phone[0]})
+        session.commit()
+        return int(existing_phone[0])
+
+    session.execute(text(
+        "INSERT INTO users (phone, nickname, role, plan, created_at) "
+        "VALUES (:phone, '管理员', 'admin', 'pro', :ts)"
+    ), {"phone": admin_phone, "ts": datetime.now().isoformat()})
+    session.commit()
+    row = session.execute(
+        text("SELECT id FROM users WHERE phone = :phone LIMIT 1"),
+        {"phone": admin_phone},
+    ).first()
+    return int(row[0])
+
+
+def _has_unique_index(engine, table_name: str, expected_columns: tuple[str, ...]) -> bool:
+    with engine.connect() as conn:
+        indexes = conn.exec_driver_sql(f"PRAGMA index_list('{table_name}')").fetchall()
+        for idx in indexes:
+            # PRAGMA index_list: seq, name, unique, origin, partial
+            if not bool(idx[2]):
+                continue
+            name = str(idx[1])
+            safe_name = name.replace("'", "''")
+            cols = conn.exec_driver_sql(f"PRAGMA index_info('{safe_name}')").fetchall()
+            col_names = tuple(str(col[2]) for col in cols)
+            if col_names == expected_columns:
+                return True
+    return False
+
+
+def _rebuild_knowledge_groups_drop_slug_unique(engine) -> None:
+    """重建 knowledge_groups 表，去掉 slug 的全局 UNIQUE，保留数据。
+
+    SQLite 重建表的标准流程：
+      1. 用新 schema 建临时表 _kg_new
+      2. INSERT INTO _kg_new SELECT * FROM knowledge_groups
+      3. DROP TABLE knowledge_groups
+      4. ALTER TABLE _kg_new RENAME TO knowledge_groups
+      5. 重建索引
+    """
+    with engine.connect() as conn:
+        conn.commit()
+        conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        try:
+            # 新表结构：去掉 slug 的 unique=True（index 保留）
+            conn.exec_driver_sql("DROP TABLE IF EXISTS _kg_new")
+            conn.exec_driver_sql("""
+            CREATE TABLE _kg_new (
+                id INTEGER PRIMARY KEY,
+                owner_id INTEGER REFERENCES users(id),
+                name VARCHAR,
+                slug VARCHAR,
+                description VARCHAR DEFAULT '',
+                enabled BOOLEAN DEFAULT 1,
+                defaults JSON,
+                prompt_overrides JSON,
+                created_at VARCHAR,
+                updated_at VARCHAR
+            )
+        """)
+            # 迁移数据
+            conn.exec_driver_sql("""
+            INSERT INTO _kg_new (id, owner_id, name, slug, description, enabled, defaults, prompt_overrides, created_at, updated_at)
+            SELECT id, owner_id, name, slug, description, enabled, defaults, prompt_overrides, created_at, updated_at
+            FROM knowledge_groups
+        """)
+            conn.exec_driver_sql("DROP TABLE knowledge_groups")
+            conn.exec_driver_sql("ALTER TABLE _kg_new RENAME TO knowledge_groups")
+            # 重建索引
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_knowledge_groups_name ON knowledge_groups (name)")
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_knowledge_groups_slug ON knowledge_groups (slug)")
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_knowledge_groups_owner_id ON knowledge_groups (owner_id)")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+            violations = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise RuntimeError(f"foreign key check failed after knowledge_groups rebuild: {violations[:5]}")
+
+
 # ============ 通用运行器 ============
 
 def current_version(session: Session) -> int:

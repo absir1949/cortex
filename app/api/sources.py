@@ -1,8 +1,10 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.schemas import SourceCreateReq, SourceUpdateReq, SourceBrief, SourceSummary
+from app.auth import get_current_user
+from app.authz import assert_group_owner, assert_source_owner
 from app.db.engine import get_session
 from app.db.repos import SignalRepo
 from app.services.source_service import SourceService
@@ -41,8 +43,14 @@ def _parse_time(value: str | None) -> datetime | None:
 
 
 @router.get("/summary", response_model=list[SourceSummary])
-def list_source_summaries(group_id: int, days: int = Query(7, ge=1, le=90)):
+def list_source_summaries(
+    group_id: int,
+    days: int = Query(7, ge=1, le=90),
+    current_user: dict = Depends(get_current_user),
+):
     """关注源列表摘要：用于专题侧栏和关注管理页。"""
+    with get_session() as s:
+        assert_group_owner(s, group_id, current_user)
     sources = SourceService().list_by_group(group_id)
     cutoff = datetime.now() - timedelta(days=days)
     out: list[SourceSummary] = []
@@ -74,7 +82,9 @@ def list_source_summaries(group_id: int, days: int = Query(7, ge=1, le=90)):
 
 
 @router.post("", response_model=SourceBrief, status_code=201)
-def create_source(group_id: int, req: SourceCreateReq):
+def create_source(group_id: int, req: SourceCreateReq, current_user: dict = Depends(get_current_user)):
+    with get_session() as s:
+        assert_group_owner(s, group_id, current_user)
     try:
         src = SourceService().create(
             group_id,
@@ -94,12 +104,16 @@ def create_source(group_id: int, req: SourceCreateReq):
 
 
 @router.patch("/{source_id}", response_model=SourceBrief)
-def update_source(group_id: int, source_id: int, req: SourceUpdateReq):
+def update_source(
+    group_id: int,
+    source_id: int,
+    req: SourceUpdateReq,
+    current_user: dict = Depends(get_current_user),
+):
     """编辑作者：改名/启停/调整采集参数"""
     svc = SourceService()
-    src = svc.get(source_id)
-    if not src or src.group_id != group_id:
-        raise HTTPException(404, "source not found")
+    with get_session() as s:
+        src = assert_source_owner(s, group_id, source_id, current_user)
     fields = {k: v for k, v in req.model_dump(exclude_unset=True).items() if v is not None}
     if not fields:
         return _to_brief(src)
@@ -110,11 +124,10 @@ def update_source(group_id: int, source_id: int, req: SourceUpdateReq):
 
 
 @router.delete("/{source_id}", status_code=204)
-def delete_source(group_id: int, source_id: int):
+def delete_source(group_id: int, source_id: int, current_user: dict = Depends(get_current_user)):
     svc = SourceService()
-    src = svc.get(source_id)
-    if not src or src.group_id != group_id:
-        raise HTTPException(404, "source not found")
+    with get_session() as s:
+        assert_source_owner(s, group_id, source_id, current_user)
     svc.delete(source_id)
     return None
 
@@ -125,12 +138,11 @@ def run_source(
     source_id: int,
     force: bool = Query(True),
     days: int = Query(7, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
 ):
     """手动触发单个源采集。force=True 忽略 interval，days 控制回看天数。"""
-    svc = SourceService()
-    src = svc.get(source_id)
-    if not src or src.group_id != group_id:
-        raise HTTPException(404, "source not found")
+    with get_session() as s:
+        assert_source_owner(s, group_id, source_id, current_user)
     task_id = get_runner().enqueue(
         TaskKind.INGEST,
         params={"source_id": source_id, "analyze": False, "group_id": group_id,

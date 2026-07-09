@@ -154,7 +154,8 @@ def test_build_signals_block_groups_by_source():
 def test_insights_api_endpoint(monkeypatch):
     from fastapi.testclient import TestClient
     from app.main import app
-    client = TestClient(app)
+    from tests.auth_helpers import auth_headers
+    client = TestClient(app, headers=auth_headers())
 
     grp, s1, s2 = _make_group_with_sources()
     _add_signal(s1, grp, "c1", "观点A", ["私域"])
@@ -181,7 +182,8 @@ def test_insights_api_endpoint(monkeypatch):
 def test_insights_api_group_not_found():
     from fastapi.testclient import TestClient
     from app.main import app
-    client = TestClient(app)
+    from tests.auth_helpers import auth_headers
+    client = TestClient(app, headers=auth_headers())
     r = client.get("/api/groups/99999/insights")
     assert r.status_code == 404
 
@@ -220,7 +222,8 @@ def test_format_insights_none():
 def test_config_api_has_insight_items():
     from fastapi.testclient import TestClient
     from app.main import app
-    client = TestClient(app)
+    from tests.auth_helpers import auth_headers
+    client = TestClient(app, headers=auth_headers())
     r = client.get("/api/config")
     sch = r.json()["schema"]
     assert "insight_lookback_days" in sch
@@ -334,7 +337,8 @@ def test_insights_api_uses_config_default_days(monkeypatch):
     from app.services import config_service
     from fastapi.testclient import TestClient
     from app.main import app
-    client = TestClient(app)
+    from tests.auth_helpers import auth_headers
+    client = TestClient(app, headers=auth_headers())
 
     grp, s1, s2 = _make_group_with_sources(slug="insight-config")
     _add_signal(s1, grp, "c1", "A", ["x"])

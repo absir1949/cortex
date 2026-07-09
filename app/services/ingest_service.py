@@ -422,7 +422,7 @@ class IngestService:
             elif final_path:
                 try:
                     from app.storage.cache import ContentCache
-                    cached = ContentCache().get_transcript(content.content_id)
+                    cached = ContentCache().get_transcript(content.platform, content.content_id)
                     if cached:
                         transcript = cached
                     else:
@@ -430,7 +430,7 @@ class IngestService:
                         transcript = transcribe_video(str(final_path))
                     storage.save_transcript(content.content_id, transcript, content.create_time)
                     from app.api.contents import invalidate_transcript_cache
-                    invalidate_transcript_cache(content.content_id)
+                    invalidate_transcript_cache(content.content_id, platform=content.platform)
                     # 转录成功后删除视频文件，只保留转录文本和元数据（省空间）
                     if final_path and final_path.exists():
                         final_path.unlink(missing_ok=True)

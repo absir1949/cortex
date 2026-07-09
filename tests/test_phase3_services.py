@@ -38,7 +38,7 @@ def test_source_service_crud_and_directory_auto():
         identifier="MS4w_xxx",
         display_name="狼教授",
     )
-    assert src.directory.startswith("g1/creator-")
+    assert src.directory.startswith(f"{g.id}/creator-")
     assert src.group_id == g.id
 
     # 重复识别符报错
@@ -54,7 +54,7 @@ def test_source_service_crud_and_directory_auto():
         display_name="微信小店",
     )
     assert kw.type == SourceType.KEYWORD.value
-    assert kw.directory.startswith("g1/keyword-")
+    assert kw.directory.startswith(f"{g.id}/keyword-")
 
     all_sources = s_svc.list_by_group(g.id)
     assert len(all_sources) == 2

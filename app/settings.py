@@ -55,6 +55,15 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_model: str = "deepseek-chat"
 
+    # 认证（JWT）
+    jwt_secret: str = ""                          # 必须由环境变量提供，避免源码默认密钥
+    jwt_ttl_hours: int = 168                      # token 有效期，默认 7 天
+    admin_phone: str = "00000000000"              # 首次迁移建的默认管理员手机号
+    verify_code_override: str = "0000"            # 开发期验证码写死，接真短信后改
+    auth_dev_mode: bool = False                   # 本地开发可放开 0000 注册
+    allow_public_register: bool = False           # 公网默认关闭自助注册
+    register_invite_code: str = ""                # 关闭公开注册时，可用邀请码注册
+
     def ensure_dirs(self) -> None:
         """确保关键目录存在"""
         for d in (self.data_dir, self.knowledge_dir, self.research_dir, self.backup_dir, self.db_dir):

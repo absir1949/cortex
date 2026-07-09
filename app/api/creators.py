@@ -1,8 +1,10 @@
 from __future__ import annotations
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
+from app.auth import get_current_user
+from app.authz import assert_source_owner
 from app.db.engine import get_session
 from app.db.repos import CreatorRepo, SourceRepo, GroupRepo, SignalRepo
 from app.storage import paths
@@ -13,15 +15,14 @@ router = APIRouter(prefix="/api", tags=["creators"])
 
 
 @router.get("/groups/{group_id}/sources/{source_id}")
-def get_source_detail(group_id: int, source_id: int):
+def get_source_detail(
+    group_id: int,
+    source_id: int,
+    current_user: dict = Depends(get_current_user),
+):
     """博主主页顶部信息：博主身份 + 平台账号 + 最近活跃"""
     with get_session() as s:
-        group = GroupRepo(s).get(group_id)
-        if not group:
-            raise HTTPException(404, "group not found")
-        src = SourceRepo(s).get(source_id)
-        if not src or src.group_id != group_id:
-            raise HTTPException(404, "source not found in this group")
+        src = assert_source_owner(s, group_id, source_id, current_user)
         creator = CreatorRepo(s).get(src.creator_id) if src.creator_id else None
         aliases = CreatorRepo(s).aliases_for(src.creator_id) if src.creator_id else []
 
@@ -50,12 +51,11 @@ def list_source_contents(
     source_id: int,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    current_user: dict = Depends(get_current_user),
 ):
     """博主的内容列表（带信号标记），用于博主主页"""
     with get_session() as s:
-        src = SourceRepo(s).get(source_id)
-        if not src or src.group_id != group_id:
-            raise HTTPException(404, "source not found")
+        src = assert_source_owner(s, group_id, source_id, current_user)
 
     storage = StorageManager(src.directory)
     mds = storage.list_metadata()  # 已按 create_time 倒序
@@ -101,12 +101,11 @@ def list_source_signals(
     group_id: int,
     source_id: int,
     limit: int = Query(50, ge=1, le=200),
+    current_user: dict = Depends(get_current_user),
 ):
     """博主的信号历史（新观点时间线）"""
     with get_session() as s:
-        src = SourceRepo(s).get(source_id)
-        if not src or src.group_id != group_id:
-            raise HTTPException(404, "source not found")
+        assert_source_owner(s, group_id, source_id, current_user)
         signals = SignalRepo(s).list_by_source(source_id, limit=limit)
     return [
         {
@@ -123,12 +122,14 @@ def list_source_signals(
 
 
 @router.get("/groups/{group_id}/sources/{source_id}/profile", response_class=PlainTextResponse)
-def get_source_profile_md(group_id: int, source_id: int):
+def get_source_profile_md(
+    group_id: int,
+    source_id: int,
+    current_user: dict = Depends(get_current_user),
+):
     """博主的观点档案（markdown 原文）"""
     with get_session() as s:
-        src = SourceRepo(s).get(source_id)
-        if not src or src.group_id != group_id:
-            raise HTTPException(404, "source not found")
+        src = assert_source_owner(s, group_id, source_id, current_user)
     if not src.creator_id:
         return f"# {src.display_name} 的观点档案\n\n（尚未关联博主身份，采集后会自动建立）"
     path = paths.profile_path(src.creator_id)

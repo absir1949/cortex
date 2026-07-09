@@ -57,7 +57,7 @@ class SourceService:
             # 目录命名
             if not directory:
                 name_part = slugify(resolved_name or resolved_identifier[:8])
-                directory = f"{group.slug}/{type_value}-{name_part}"
+                directory = f"{group.id}/{type_value}-{name_part}"
 
             # creator 类型：先建/关联全局博主身份，再带 creator_id 建 source（原子化）
             creator_id = None

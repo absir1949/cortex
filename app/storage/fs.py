@@ -1,4 +1,8 @@
-"""文件系统存储 - 按 Source.directory 定位"""
+"""文件系统存储.
+
+StorageManager keeps the legacy source-directory layout. GlobalStorage is the
+new shared-ingest layout keyed by platform and creator owner key.
+"""
 from __future__ import annotations
 import json
 import shutil
@@ -99,3 +103,20 @@ class StorageManager:
                 continue
         out.sort(key=lambda x: x.get("create_time", ""), reverse=True)
         return out
+
+
+class GlobalStorage(StorageManager):
+    """共享采集存储：data/{platform}/creators/{creator_id|_unknown}/..."""
+
+    def __init__(
+        self,
+        platform: str,
+        creator_id: Optional[int] = None,
+        *,
+        owner_key: Optional[str] = None,
+    ):
+        self.platform = platform
+        self.owner_key = owner_key or paths.content_owner_key(creator_id)
+        self.directory = f"{platform}/creators/{self.owner_key}"
+        self.base = paths.content_dir(platform, self.owner_key)
+        self.base.mkdir(parents=True, exist_ok=True)

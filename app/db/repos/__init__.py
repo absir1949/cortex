@@ -9,6 +9,7 @@ from .signal_repo import SignalRepo
 from .creator_repo import CreatorRepo
 from .content_repo import ContentRepo
 from .refresh_run_repo import RefreshRunRepo
+from .user_repo import UserRepo
 
 __all__ = [
     "GroupRepo",
@@ -21,4 +22,5 @@ __all__ = [
     "CreatorRepo",
     "ContentRepo",
     "RefreshRunRepo",
+    "UserRepo",
 ]

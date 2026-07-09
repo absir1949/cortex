@@ -21,6 +21,14 @@ class ContentRepo:
             )
         ).first()
 
+    def list_by_platform_content(self, platform: str, content_id: str) -> list[ContentItem]:
+        return list(self.session.exec(
+            select(ContentItem).where(
+                ContentItem.platform == platform,
+                ContentItem.content_id == content_id,
+            )
+        ).all())
+
     def known_ids(self, source_id: int) -> set[str]:
         rows = self.session.exec(
             select(ContentItem.content_id).where(ContentItem.source_id == source_id)

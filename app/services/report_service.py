@@ -22,6 +22,10 @@ class ReportService:
         with get_session() as s:
             return ReportRepo(s).list_recent(limit=limit)
 
+    def list_recent_by_group_ids(self, group_ids: list[int], limit: int = 10) -> list[Report]:
+        with get_session() as s:
+            return ReportRepo(s).list_recent_by_group_ids(group_ids, limit=limit)
+
     def get_content(self, report_id: int) -> Optional[str]:
         r = self.get(report_id)
         if not r:

@@ -92,6 +92,21 @@ class SignalRepo:
         stmt = stmt.order_by(Signal.created_at.desc()).limit(limit)
         return list(self.session.exec(stmt).all())
 
+    def list_recent_by_group_ids(
+        self,
+        group_ids: list[int],
+        *,
+        is_new: Optional[bool] = None,
+        limit: int = 20,
+    ) -> list[Signal]:
+        if not group_ids:
+            return []
+        stmt = select(Signal).where(Signal.group_id.in_(group_ids))
+        if is_new is not None:
+            stmt = stmt.where(Signal.is_new == is_new)
+        stmt = stmt.order_by(Signal.created_at.desc()).limit(limit)
+        return list(self.session.exec(stmt).all())
+
     def list_new_by_group(self, group_id: int, *, limit: int = 100) -> list[Signal]:
         """组内所有「新观点」信号（日报/前端重点展示用）"""
         return self.list_by_group(group_id, is_new=True, limit=limit)

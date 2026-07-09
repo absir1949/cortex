@@ -9,11 +9,13 @@ from app.db.schema import (
     AskConversation,
     AskMessage,
     ContentItem,
+    GroupContent,
     KnowledgeGroup,
     RefreshRun,
     Report,
     Signal,
     Source,
+    SourceContent,
     Task,
 )
 
@@ -25,11 +27,21 @@ class GroupRepo:
     def list_all(self) -> list[KnowledgeGroup]:
         return list(self.session.exec(select(KnowledgeGroup).order_by(KnowledgeGroup.id)).all())
 
+    def list_by_owner(self, owner_id: int) -> list[KnowledgeGroup]:
+        return list(self.session.exec(
+            select(KnowledgeGroup)
+            .where(KnowledgeGroup.owner_id == owner_id)
+            .order_by(KnowledgeGroup.id)
+        ).all())
+
     def get(self, group_id: int) -> Optional[KnowledgeGroup]:
         return self.session.get(KnowledgeGroup, group_id)
 
-    def get_by_slug(self, slug: str) -> Optional[KnowledgeGroup]:
-        return self.session.exec(select(KnowledgeGroup).where(KnowledgeGroup.slug == slug)).first()
+    def get_by_slug(self, slug: str, owner_id: Optional[int] = None) -> Optional[KnowledgeGroup]:
+        stmt = select(KnowledgeGroup).where(KnowledgeGroup.slug == slug)
+        if owner_id is not None:
+            stmt = stmt.where(KnowledgeGroup.owner_id == owner_id)
+        return self.session.exec(stmt).first()
 
     def create(self, group: KnowledgeGroup) -> KnowledgeGroup:
         self.session.add(group)
@@ -64,8 +76,10 @@ class GroupRepo:
             self.session.exec(delete(RefreshRun).where(RefreshRun.group_id == group_id))
             self.session.exec(delete(Signal).where(Signal.group_id == group_id))
             self.session.exec(delete(ContentItem).where(ContentItem.group_id == group_id))
+            self.session.exec(delete(GroupContent).where(GroupContent.group_id == group_id))
 
             if source_ids:
+                self.session.exec(delete(SourceContent).where(SourceContent.source_id.in_(source_ids)))
                 self.session.exec(delete(RefreshRun).where(RefreshRun.source_id.in_(source_ids)))
                 self.session.exec(delete(Signal).where(Signal.source_id.in_(source_ids)))
                 self.session.exec(delete(ContentItem).where(ContentItem.source_id.in_(source_ids)))

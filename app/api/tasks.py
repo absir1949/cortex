@@ -1,8 +1,11 @@
 from __future__ import annotations
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.schemas import TaskResp
+from app.auth import get_current_user
+from app.authz import assert_task_owner, owned_group_ids
+from app.db.engine import get_session
 from app.services.task_service import TaskService
 from app.tasks import get_runner
 
@@ -25,21 +28,25 @@ def list_tasks(
     kind: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=500),
+    current_user: dict = Depends(get_current_user),
 ):
-    tasks = TaskService().list(kind=kind, status=status, limit=limit)
+    with get_session() as s:
+        group_ids = owned_group_ids(s, current_user)
+    tasks = TaskService().list_by_group_ids(group_ids, kind=kind, status=status, limit=limit)
     return [_to_resp(t) for t in tasks]
 
 
 @router.get("/{task_id}", response_model=TaskResp)
-def get_task(task_id: str):
-    t = TaskService().get(task_id)
-    if not t:
-        raise HTTPException(404, "task not found")
+def get_task(task_id: str, current_user: dict = Depends(get_current_user)):
+    with get_session() as s:
+        t = assert_task_owner(s, task_id, current_user)
     return _to_resp(t)
 
 
 @router.post("/{task_id}/cancel")
-def cancel_task(task_id: str):
+def cancel_task(task_id: str, current_user: dict = Depends(get_current_user)):
+    with get_session() as s:
+        assert_task_owner(s, task_id, current_user)
     ok = get_runner().cancel(task_id)
     if not ok:
         raise HTTPException(404, "task not running or not found")

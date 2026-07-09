@@ -101,7 +101,7 @@ class KnowledgeService:
 
         # 落地报告
         report_md, report_json_path = self._write_report(
-            group.slug,
+            group.id,
             analyzed_results,
             insights,
             refresh_summary=refresh_summary,
@@ -530,12 +530,12 @@ class KnowledgeService:
 
     def _write_report(
         self,
-        group_slug: str,
+        group_id: int,
         results: list[dict],
         insights: Optional[dict] = None,
         refresh_summary: Optional[dict] = None,
     ) -> tuple[Path, Path]:
-        dir_ = paths.knowledge_dir_for_group(group_slug)
+        dir_ = paths.knowledge_dir_for_group(group_id)
         dir_.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         md_path = dir_ / f"knowledge_{ts}.md"

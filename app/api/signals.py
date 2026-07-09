@@ -1,7 +1,9 @@
 from __future__ import annotations
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.auth import get_current_user
+from app.authz import assert_group_owner, owned_group_ids
 from app.db.engine import get_session
 from app.db.repos import SignalRepo, GroupRepo, SourceRepo
 from app.services import config_service
@@ -64,10 +66,12 @@ def _enrich_with_content(signals: list, sources: dict) -> list:
 def list_recent_signals(
     is_new: Optional[bool] = Query(None),
     limit: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
 ):
     """最近的观点信号（首页新信号展示用）"""
     with get_session() as s:
-        signals = SignalRepo(s).list_recent(is_new=is_new, limit=limit)
+        group_ids = owned_group_ids(s, current_user)
+        signals = SignalRepo(s).list_recent_by_group_ids(group_ids, is_new=is_new, limit=limit)
         source_ids = {sig.source_id for sig in signals}
         sources = {src.id: src for src in (SourceRepo(s).get(sid) for sid in source_ids) if src}
     return _enrich_with_content(signals, sources)
@@ -78,22 +82,21 @@ def list_group_signals(
     group_id: int,
     is_new: Optional[bool] = Query(None),
     limit: int = Query(100, ge=1, le=500),
+    current_user: dict = Depends(get_current_user),
 ):
     """组内信号列表（可过滤新观点）"""
     with get_session() as s:
-        if not GroupRepo(s).get(group_id):
-            raise HTTPException(404, "group not found")
+        assert_group_owner(s, group_id, current_user)
         signals = SignalRepo(s).list_by_group(group_id, is_new=is_new, limit=limit)
         sources = {src.id: src for src in SourceRepo(s).list_by_group(group_id)}
     return _enrich_with_content(signals, sources)
 
 
 @router.get("/groups/{group_id}/signals/stats")
-def group_signal_stats(group_id: int):
+def group_signal_stats(group_id: int, current_user: dict = Depends(get_current_user)):
     """组内信号统计（新观点数 / 老调重弹数）"""
     with get_session() as s:
-        if not GroupRepo(s).get(group_id):
-            raise HTTPException(404, "group not found")
+        assert_group_owner(s, group_id, current_user)
         repo = SignalRepo(s)
         new_sigs = repo.list_by_group(group_id, is_new=True, limit=1000)
         old_sigs = repo.list_by_group(group_id, is_new=False, limit=1000)
@@ -106,17 +109,19 @@ def group_signal_stats(group_id: int):
 
 
 @router.get("/groups/{group_id}/insights")
-def get_group_insights(group_id: int, days: Optional[int] = Query(None, ge=1, le=90)):
+def get_group_insights(
+    group_id: int,
+    days: Optional[int] = Query(None, ge=1, le=90),
+    current_user: dict = Depends(get_current_user),
+):
     """按需重新生成跨博主趋势洞察。
 
     days 不传时，读 insight_lookback_days 配置作为默认值（与日报里的趋势提炼保持一致）。
     """
     with get_session() as s:
-        if not GroupRepo(s).get(group_id):
-            raise HTTPException(404, "group not found")
+        assert_group_owner(s, group_id, current_user)
     # days 未指定则用配置默认值
     if days is None:
         days = config_service.system_int("insight_lookback_days", 14)
     from app.services.insight_service import InsightService
     return InsightService().build_group_insights(group_id, days=days)
-

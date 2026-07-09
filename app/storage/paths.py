@@ -1,9 +1,10 @@
 """路径规范集中定义
 
 目录布局：
-  data/{group_slug}/{source_slug}/YYYY-MM-DD_{content_id}.{mp4|txt|json}
-  knowledge/{group_slug}/knowledge_YYYYMMDD_HHMMSS.{md|json}
-  knowledge/{group_slug}/profiles/{source_id}.md   ← 观点档案（持续更新）
+  data/{group_id}/{source_slug}/YYYY-MM-DD_{content_id}.{mp4|txt|json}  [legacy compatible]
+  data/{platform}/creators/{creator_id|_unknown}/YYYY-MM-DD_{content_id}.{mp4|txt|json}
+  knowledge/{group_id}/knowledge_YYYYMMDD_HHMMSS.{md|json}
+  knowledge/profiles/{creator_id}.md   ← 全局观点档案
   research/{task_id}/{inputs/, comments/, report.md}
 """
 from __future__ import annotations
@@ -31,8 +32,20 @@ def source_dir(source_directory: str) -> Path:
     return settings.data_dir / source_directory
 
 
-def knowledge_dir_for_group(group_slug: str) -> Path:
-    return settings.knowledge_dir / group_slug
+def knowledge_dir_for_group(group_id: int | str) -> Path:
+    return settings.knowledge_dir / str(group_id)
+
+
+def content_owner_key(creator_id: Optional[int]) -> str:
+    return str(creator_id) if creator_id is not None else "_unknown"
+
+
+def content_dir(platform: str, owner_key: str) -> Path:
+    return settings.data_dir / platform / "creators" / owner_key
+
+
+def content_file(platform: str, owner_key: str, content_id: str, create_time: Optional[str], ext: str) -> Path:
+    return content_dir(platform, owner_key) / content_filename(content_id, create_time, ext)
 
 
 def research_dir_for_task(task_id: str) -> Path:

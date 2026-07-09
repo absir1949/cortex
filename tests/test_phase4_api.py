@@ -3,12 +3,13 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from tests.auth_helpers import auth_headers
 
 
 def _client() -> TestClient:
     app = create_app()
     # 使用 lifespan
-    return TestClient(app)
+    return TestClient(app, headers=auth_headers())
 
 
 def test_health():

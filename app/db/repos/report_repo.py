@@ -31,3 +31,14 @@ class ReportRepo:
     def list_recent(self, limit: int = 10) -> list[Report]:
         stmt = select(Report).order_by(Report.created_at.desc()).limit(limit)
         return list(self.session.exec(stmt).all())
+
+    def list_recent_by_group_ids(self, group_ids: list[int], limit: int = 10) -> list[Report]:
+        if not group_ids:
+            return []
+        stmt = (
+            select(Report)
+            .where(Report.group_id.in_(group_ids))
+            .order_by(Report.created_at.desc())
+            .limit(limit)
+        )
+        return list(self.session.exec(stmt).all())

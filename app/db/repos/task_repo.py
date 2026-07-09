@@ -34,6 +34,24 @@ class TaskRepo:
         stmt = stmt.order_by(Task.created_at.desc()).limit(limit)
         return list(self.session.exec(stmt).all())
 
+    def list_by_group_ids(
+        self,
+        group_ids: list[int],
+        *,
+        kind: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[Task]:
+        if not group_ids:
+            return []
+        stmt = select(Task).where(Task.group_id.in_(group_ids))
+        if kind:
+            stmt = stmt.where(Task.kind == kind)
+        if status:
+            stmt = stmt.where(Task.status == status)
+        stmt = stmt.order_by(Task.created_at.desc()).limit(limit)
+        return list(self.session.exec(stmt).all())
+
     def set_status(
         self,
         task_id: str,

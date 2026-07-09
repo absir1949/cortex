@@ -9,17 +9,18 @@ from app.storage.paths import slugify
 
 class GroupService:
 
-    def list(self) -> list[KnowledgeGroup]:
+    def list(self, owner_id: Optional[int] = None) -> list[KnowledgeGroup]:
         with get_session() as s:
-            return GroupRepo(s).list_all()
+            repo = GroupRepo(s)
+            return repo.list_by_owner(owner_id) if owner_id is not None else repo.list_all()
 
     def get(self, group_id: int) -> Optional[KnowledgeGroup]:
         with get_session() as s:
             return GroupRepo(s).get(group_id)
 
-    def get_by_slug(self, slug: str) -> Optional[KnowledgeGroup]:
+    def get_by_slug(self, slug: str, owner_id: Optional[int] = None) -> Optional[KnowledgeGroup]:
         with get_session() as s:
-            return GroupRepo(s).get_by_slug(slug)
+            return GroupRepo(s).get_by_slug(slug, owner_id=owner_id)
 
     def create(
         self,
@@ -29,14 +30,16 @@ class GroupService:
         description: str = "",
         defaults: Optional[dict] = None,
         prompt_overrides: Optional[dict] = None,
+        owner_id: Optional[int] = None,
     ) -> KnowledgeGroup:
         with get_session() as s:
             repo = GroupRepo(s)
             final_slug = slug or slugify(name)
-            existing = repo.get_by_slug(final_slug)
+            existing = repo.get_by_slug(final_slug, owner_id=owner_id)
             if existing:
                 raise ValueError(f"知识组 slug '{final_slug}' 已存在")
             g = KnowledgeGroup(
+                owner_id=owner_id,
                 name=name,
                 slug=final_slug,
                 description=description,

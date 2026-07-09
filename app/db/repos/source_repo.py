@@ -1,9 +1,10 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
+from sqlalchemy import delete
 from sqlmodel import Session, select
 
-from app.db.schema import Source
+from app.db.schema import AnalyzedContent, ContentItem, RefreshRun, Signal, Source, SourceContent, Task
 
 
 class SourceRepo:
@@ -48,6 +49,12 @@ class SourceRepo:
     def delete(self, source_id: int) -> None:
         source = self.session.get(Source, source_id)
         if source:
+            self.session.exec(delete(SourceContent).where(SourceContent.source_id == source_id))
+            self.session.exec(delete(RefreshRun).where(RefreshRun.source_id == source_id))
+            self.session.exec(delete(Signal).where(Signal.source_id == source_id))
+            self.session.exec(delete(ContentItem).where(ContentItem.source_id == source_id))
+            self.session.exec(delete(AnalyzedContent).where(AnalyzedContent.source_id == source_id))
+            self.session.exec(delete(Task).where(Task.source_id == source_id))
             self.session.delete(source)
             self.session.commit()
 

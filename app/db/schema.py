@@ -1,20 +1,25 @@
 """持久化表定义 - SQLModel
 
 表：
-  knowledge_groups   知识组
+  users              用户（手机号+角色+订阅状态）
+  knowledge_groups   知识组（owner_id 关联用户）
   creators           博主（跨平台聚合的全局身份）
   creator_aliases    博主的平台账号映射（platform+uid → creator）
-  sources            订阅源（组 × 平台账号，关联到 creator）
+  sources            订阅关系（组 × 平台账号/关键词，关联到 creator）
   settings           系统级 runtime 配置（key-value JSON）
   tasks              异步任务
   reports            产出报告元数据（正文在文件系统）
   refresh_runs       一次作者/专题刷新的运行记录与阶段统计
-  content_items      每条内容的处理状态（水位、失败、补跑依据）
-  analyzed_content   已分析过的 content_id（增量分析，替代 .analyzed.json）
+  content_items      [遗留] 每条内容的处理状态——将被 global_content 取代
+  analyzed_content   [遗留] 已分析过的 content_id——将被 group_content 取代
   signals            每条内容的观点判定（新观点/老调重弹）+ 提炼的新观点
   ask_conversations  问听风专题内对话
   ask_messages       问听风对话消息
   prompt_history     prompt 修改历史（保留版本）
+  global_content     全局内容资产（采一份，跨用户共享）
+  source_content     订阅×内容关系（哪个订阅发现了哪条全局内容）
+  group_content      专题级水位（group × global_content，防重复消费）
+  ingest_targets     采集目标（creator/keyword 级调度单元，含状态+并发锁）
   schema_version     迁移版本号
 """
 from __future__ import annotations
@@ -24,14 +29,39 @@ from sqlalchemy import JSON, ForeignKey, UniqueConstraint
 from sqlmodel import Field, SQLModel, Column
 
 
+# ---------- 用户 ----------
+
+class User(SQLModel, table=True):
+    """用户——手机号注册，role 区分普通用户和管理员。
+
+    plan/expires_at 控制订阅状态：scheduler 跳过过期用户的采集。
+    """
+    __tablename__ = "users"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    phone: str = Field(unique=True, index=True)
+    nickname: str = ""
+    role: str = Field(default="user", index=True)  # "user" | "admin"
+    plan: str = Field(default="none")               # "none" | "pro"
+    expires_at: Optional[str] = None                # ISO 8601，NULL=未开通
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+# ---------- 知识组 ----------
+
+
 # ---------- 知识组 ----------
 
 class KnowledgeGroup(SQLModel, table=True):
     __tablename__ = "knowledge_groups"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "slug", name="uq_group_owner_slug"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    owner_id: Optional[int] = Field(default=None, foreign_key="users.id", index=True)
     name: str = Field(index=True)
-    slug: str = Field(unique=True, index=True)  # 目录名用
+    slug: str = Field(index=True)  # (owner_id, slug) 联合唯一；目录名改用 group.id
     description: str = ""
     enabled: bool = Field(default=True)
 
@@ -316,6 +346,120 @@ class PromptHistory(SQLModel, table=True):
     name: str = Field(index=True)             # analysis_prompt_template / research_prompt_template
     content: str
     saved_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+# ---------- 全局内容资产（共享采集）----------
+
+class GlobalContent(SQLModel, table=True):
+    """全局内容资产——一个 (platform, content_id) 全局唯一，采一份，所有订阅者共享。
+
+    吸收 ContentItem 的内容元数据 + 完整五阶段采集状态。
+    creator_id 可空（author 未知时），存储路径用 "_unknown" 兜底。
+    """
+    __tablename__ = "global_content"
+    __table_args__ = (UniqueConstraint("platform", "content_id", name="uq_global_content"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    platform: str = Field(index=True)
+    content_id: str = Field(index=True)
+    creator_id: Optional[int] = Field(default=None, foreign_key="creators.id", index=True)
+
+    # 内容元数据
+    content_type: str = ""
+    title: str = ""
+    author_id: str = ""
+    author_name: str = ""
+    url: str = ""
+    create_time: str = Field(default="", index=True)
+
+    first_seen_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    last_seen_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+    # 五阶段采集状态（全局，采一次）
+    media_status: str = Field(default="pending", index=True)
+    transcript_status: str = Field(default="pending", index=True)
+    comments_status: str = Field(default="pending", index=True)
+    signal_status: str = Field(default="pending", index=True)
+    profile_status: str = Field(default="pending", index=True)
+
+    media_error: Optional[str] = None
+    transcript_error: Optional[str] = None
+    comments_error: Optional[str] = None
+    signal_error: Optional[str] = None
+    profile_error: Optional[str] = None
+
+    file_size: int = 0
+    statistics: dict = Field(default_factory=dict, sa_column=Column(JSON))
+
+
+class SourceContent(SQLModel, table=True):
+    """订阅 × 全局内容 的多对多关系。
+
+    记录"哪个订阅发现了哪条全局内容"。不承载水位（水位在 GroupContent）。
+    ingest_target_id 用于 keyword 回填精确匹配（不靠 matched_query 字符串，防串平台）。
+    """
+    __tablename__ = "source_content"
+    __table_args__ = (UniqueConstraint("source_id", "global_content_id", name="uq_source_content"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    source_id: int = Field(foreign_key="sources.id", index=True)
+    global_content_id: int = Field(foreign_key="global_content.id", index=True)
+    ingest_target_id: Optional[int] = Field(default=None, foreign_key="ingest_targets.id", index=True)
+    matched_query: str = ""          # creator 类型为空；keyword 类型记录关键词（仅展示用）
+
+    first_seen_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+class GroupContent(SQLModel, table=True):
+    """专题级水位：group × global_content。
+
+    按 (group_id, global_content_id) 去重——防止 group 同时订阅 author+keyword 时
+    同一内容被多条 SourceContent 命中而重复进报告。
+    """
+    __tablename__ = "group_content"
+    __table_args__ = (UniqueConstraint("group_id", "global_content_id", name="uq_group_content"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    group_id: int = Field(foreign_key="knowledge_groups.id", index=True)
+    global_content_id: int = Field(foreign_key="global_content.id", index=True)
+
+    first_seen_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    analyzed_at: Optional[str] = None  # NULL=未进报告；有值=已消费
+
+
+class IngestTarget(SQLModel, table=True):
+    """采集目标——调度的实际单元。creator 和 keyword 是两种 target。
+
+    creator 订阅 → 按 creator 的 sec_uid 建 target。
+    keyword 订阅 → 按 normalized query 建 target。
+    无 creator_id 字段：keyword target 是 query，搜索返回多作者，无单一 creator。
+    """
+    __tablename__ = "ingest_targets"
+    __table_args__ = (
+        UniqueConstraint("platform", "kind", "target_key", name="uq_ingest_target"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    platform: str = Field(index=True)
+    kind: str = Field(index=True)        # "creator" | "keyword"
+    target_key: str = Field(index=True)  # creator: sec_uid；keyword: normalized query
+    enabled: bool = Field(default=True)  # 无订阅时 False，scheduler 跳过；新订阅回来时 True
+
+    # 合并后的采集参数（取所有订阅该 target 的 Source 的最激进值）
+    interval_hours: int = 48
+    days: int = 7
+    content_limit: int = 50
+    comment_top_n: int = 20
+
+    # 持久化采集状态（调度依赖）
+    last_check: Optional[str] = None       # 上次采集时间（判断 due）
+    last_error: Optional[str] = None
+    running_task_id: Optional[str] = None  # 并发锁：正在跑的任务
+    locked_at: Optional[str] = None        # 加锁时间（防死锁超时清理）
+
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 
 # ---------- Schema 版本号 ----------

@@ -4,6 +4,9 @@ uvicorn[standard]>=0.32.0
 pydantic>=2.9.0
 pydantic-settings>=2.6.0
 
+# 认证
+pyjwt>=2.8.0
+
 # 数据库
 sqlmodel>=0.0.22
 

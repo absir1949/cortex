@@ -1,11 +1,13 @@
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.schemas import ConfigUpdateReq, PromptUpdateReq
+from app.auth import require_admin
 from app.services import config_service
 
 
-router = APIRouter(prefix="/api/config", tags=["config"])
+router = APIRouter(prefix="/api/config", tags=["config"],
+                   dependencies=[Depends(require_admin)])
 
 
 # 字段 schema（前端渲染表单用）

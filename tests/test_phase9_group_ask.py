@@ -12,6 +12,7 @@ from app.db.repos import GroupRepo, SourceRepo, SignalRepo
 from app.models.group import SourceType
 from app.services.knowledge_service import KnowledgeService
 from app.storage.fs import StorageManager
+from tests.auth_helpers import auth_headers
 
 
 def _session() -> Session:
@@ -83,7 +84,7 @@ def test_answer_group_question_group_not_found():
 
 def test_group_ask_api_endpoint(monkeypatch):
     from app.main import app
-    client = TestClient(app)
+    client = TestClient(app, headers=auth_headers())
     grp, _ = _make_group_with_material()
 
     def fake_answer(self, group_id, question, *, days=30, limit=12):
@@ -105,7 +106,7 @@ def test_group_ask_api_endpoint(monkeypatch):
 
 def test_source_summary_api_counts_recent_material():
     from app.main import app
-    client = TestClient(app)
+    client = TestClient(app, headers=auth_headers())
     grp, _ = _make_group_with_material()
 
     r = client.get(f"/api/groups/{grp}/sources/summary?days=7")
@@ -120,7 +121,7 @@ def test_source_summary_api_counts_recent_material():
 
 def test_group_summary_api_counts_recent_material():
     from app.main import app
-    client = TestClient(app)
+    client = TestClient(app, headers=auth_headers())
     grp, _ = _make_group_with_material()
 
     r = client.get("/api/groups/summary?days=7")
@@ -136,7 +137,7 @@ def test_group_summary_api_counts_recent_material():
 
 def test_group_ask_conversation_flow(monkeypatch):
     from app.main import app
-    client = TestClient(app)
+    client = TestClient(app, headers=auth_headers())
     grp, _ = _make_group_with_material()
 
     def fake_answer(self, group_id, question, *, days=30, limit=12):
@@ -181,7 +182,7 @@ def test_group_ask_conversation_flow(monkeypatch):
 
 def test_continue_conversation_checks_group_before_llm(monkeypatch):
     from app.main import app
-    client = TestClient(app)
+    client = TestClient(app, headers=auth_headers())
     grp, _ = _make_group_with_material()
     with _session() as s:
         other = GroupRepo(s).create(KnowledgeGroup(name="另一个专题", slug="ask-other"))
@@ -207,7 +208,7 @@ def test_continue_conversation_checks_group_before_llm(monkeypatch):
 
 def test_create_conversation_checks_group_before_llm(monkeypatch):
     from app.main import app
-    client = TestClient(app)
+    client = TestClient(app, headers=auth_headers())
     called = []
 
     def fake_answer(self, group_id, question, *, days=30, limit=12):
@@ -224,7 +225,7 @@ def test_create_conversation_checks_group_before_llm(monkeypatch):
 
 def test_delete_group_cascades_ask_conversations():
     from app.main import app
-    client = TestClient(app)
+    client = TestClient(app, headers=auth_headers())
     grp, _ = _make_group_with_material()
     with _session() as s:
         conv = AskConversation(group_id=grp, title="待删除对话")

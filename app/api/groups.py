@@ -1,11 +1,13 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.schemas import (
     GroupCreateReq, GroupUpdateReq,
     GroupResp, GroupSummaryResp, GroupDetailResp, SourceBrief,
 )
+from app.auth import get_current_user
+from app.authz import assert_group_owner, current_user_id, is_admin
 from app.services.group_service import GroupService
 from app.services.source_service import SourceService
 from app.db.engine import get_session
@@ -51,9 +53,9 @@ def _parse_time(value: str | None) -> datetime | None:
 
 
 @router.get("", response_model=list[GroupResp])
-def list_groups():
+def list_groups(current_user: dict = Depends(get_current_user)):
     svc = GroupService()
-    groups = svc.list()
+    groups = svc.list(None if is_admin(current_user) else current_user_id(current_user))
     # 查每组的 source_count
     with get_session() as s:
         repo = GroupRepo(s)
@@ -62,8 +64,11 @@ def list_groups():
 
 
 @router.get("/summary", response_model=list[GroupSummaryResp])
-def list_group_summaries(days: int = Query(7, ge=1, le=90)):
-    groups = GroupService().list()
+def list_group_summaries(
+    days: int = Query(7, ge=1, le=90),
+    current_user: dict = Depends(get_current_user),
+):
+    groups = GroupService().list(None if is_admin(current_user) else current_user_id(current_user))
     cutoff = datetime.now() - timedelta(days=days)
     with get_session() as s:
         group_repo = GroupRepo(s)
@@ -100,7 +105,7 @@ def list_group_summaries(days: int = Query(7, ge=1, le=90)):
 
 
 @router.post("", response_model=GroupResp, status_code=201)
-def create_group(req: GroupCreateReq):
+def create_group(req: GroupCreateReq, current_user: dict = Depends(get_current_user)):
     try:
         g = GroupService().create(
             name=req.name,
@@ -108,6 +113,7 @@ def create_group(req: GroupCreateReq):
             description=req.description,
             defaults=req.defaults,
             prompt_overrides=req.prompt_overrides,
+            owner_id=current_user_id(current_user),
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -115,11 +121,11 @@ def create_group(req: GroupCreateReq):
 
 
 @router.get("/{group_id}", response_model=GroupDetailResp)
-def get_group(group_id: int):
+def get_group(group_id: int, current_user: dict = Depends(get_current_user)):
     svc = GroupService()
+    with get_session() as s:
+        assert_group_owner(s, group_id, current_user)
     g = svc.get(group_id)
-    if not g:
-        raise HTTPException(404, "group not found")
     sources = SourceService().list_by_group(group_id)
     return GroupDetailResp(
         **_to_resp(g, len(sources)).model_dump(),
@@ -139,7 +145,9 @@ def get_group(group_id: int):
 
 
 @router.patch("/{group_id}", response_model=GroupResp)
-def update_group(group_id: int, req: GroupUpdateReq):
+def update_group(group_id: int, req: GroupUpdateReq, current_user: dict = Depends(get_current_user)):
+    with get_session() as s:
+        assert_group_owner(s, group_id, current_user)
     g = GroupService().update(group_id, **req.model_dump(exclude_unset=True))
     if not g:
         raise HTTPException(404, "group not found")
@@ -154,10 +162,14 @@ def update_group(group_id: int, req: GroupUpdateReq):
 
 
 @router.post("/{group_id}/run", status_code=202)
-def run_group(group_id: int, force: bool = Query(True), analyze: bool = Query(True)):
-    g = GroupService().get(group_id)
-    if not g:
-        raise HTTPException(404, "group not found")
+def run_group(
+    group_id: int,
+    force: bool = Query(True),
+    analyze: bool = Query(True),
+    current_user: dict = Depends(get_current_user),
+):
+    with get_session() as s:
+        assert_group_owner(s, group_id, current_user)
     task_id = get_runner().enqueue(
         TaskKind.INGEST,
         params={"group_id": group_id, "force": force, "analyze": analyze},
@@ -167,11 +179,10 @@ def run_group(group_id: int, force: bool = Query(True), analyze: bool = Query(Tr
 
 
 @router.post("/{group_id}/analyze", status_code=202)
-def analyze_group(group_id: int):
+def analyze_group(group_id: int, current_user: dict = Depends(get_current_user)):
     """只整理报告，不重新采集。基于已有信号和转录产出日报。"""
-    g = GroupService().get(group_id)
-    if not g:
-        raise HTTPException(404, "group not found")
+    with get_session() as s:
+        assert_group_owner(s, group_id, current_user)
     task_id = get_runner().enqueue(
         TaskKind.ANALYZE,
         params={"group_id": group_id},
@@ -181,6 +192,12 @@ def analyze_group(group_id: int):
 
 
 @router.delete("/{group_id}", status_code=204)
-def delete_group(group_id: int, cascade: bool = Query(False)):
+def delete_group(
+    group_id: int,
+    cascade: bool = Query(False),
+    current_user: dict = Depends(get_current_user),
+):
+    with get_session() as s:
+        assert_group_owner(s, group_id, current_user)
     GroupService().delete(group_id, cascade=cascade)
     return None

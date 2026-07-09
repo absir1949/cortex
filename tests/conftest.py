@@ -14,4 +14,8 @@ def fresh_db(tmp_path: Path):
     reset_engine_for_tests(db_file)
     from app.db import schema  # noqa: F401 注册模型
     SQLModel.metadata.create_all(get_engine())
+    from app.settings import settings
+    old_secret = settings.jwt_secret
+    settings.jwt_secret = "test-secret-for-cortex-suite-32bytes"
     yield
+    settings.jwt_secret = old_secret

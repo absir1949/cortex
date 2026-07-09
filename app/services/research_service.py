@@ -100,14 +100,14 @@ class ResearchService:
             cid = c.content_id
 
             # ---- 1. 转录：先查缓存 ----
-            cached_transcript = self.cache.get_transcript(cid)
+            cached_transcript = self.cache.get_transcript(plat, cid)
             if cached_transcript:
                 item["transcript"] = cached_transcript
                 item["from_cache"]["transcript"] = True
                 stats["transcript_hit"] += 1
             else:
                 # 视频文件：先查缓存，没有再下载
-                cached_video = self.cache.get_video_path(cid)
+                cached_video = self.cache.get_video_path(plat, cid)
                 if cached_video:
                     local_video = cached_video
                     item["from_cache"]["video"] = True
@@ -135,7 +135,7 @@ class ResearchService:
                         self._log(log_cb, f"  [{cid[:8]}] 转录失败: {e}")
 
             # ---- 2. 评论：先查缓存 ----
-            cached_comments = self.cache.get_comments(cid)
+            cached_comments = self.cache.get_comments(plat, cid)
             if cached_comments is not None:
                 item["comments"] = cached_comments
                 item["from_cache"]["comments"] = True

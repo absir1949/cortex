@@ -330,7 +330,8 @@ def test_signal_evaluate_below_min_new_points(monkeypatch):
 def test_signals_api_endpoints():
     from fastapi.testclient import TestClient
     from app.main import app
-    client = TestClient(app)
+    from tests.auth_helpers import auth_headers
+    client = TestClient(app, headers=auth_headers())
 
     grp, src = _make_group_and_source()
     # 造两条信号
@@ -372,7 +373,8 @@ def test_signals_api_endpoints():
 def test_signals_api_group_not_found():
     from fastapi.testclient import TestClient
     from app.main import app
-    client = TestClient(app)
+    from tests.auth_helpers import auth_headers
+    client = TestClient(app, headers=auth_headers())
 
     r = client.get("/api/groups/99999/signals")
     assert r.status_code == 404

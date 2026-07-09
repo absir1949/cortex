@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -37,6 +37,8 @@ from app.api import creators as creators_api
 from app.api import contents as contents_api
 from app.api import platforms as platforms_api
 from app.api import ask as ask_api
+from app.api import auth as auth_api
+from app.auth import get_current_user, require_admin
 from app.tasks import get_runner
 from app.tasks.handlers import ingest_handler, research_handler, analyze_handler  # noqa: F401 注册 handlers
 from app.scheduler import get_scheduler
@@ -56,7 +58,8 @@ async def lifespan(app: FastAPI):
         if applied:
             logger.info(f"migrations applied: {applied}")
     except Exception as e:
-        logger.error(f"migration failed: {e}")
+        logger.exception(f"migration failed: {e}")
+        raise
 
     # 任务执行器（每次 lifespan 创建新实例，避免测试复用 shutdown 后的 executor）
     from app.tasks import set_runner
@@ -100,26 +103,30 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # REST 路由
-    app.include_router(groups_api.router)
-    app.include_router(sources_api.router)
-    app.include_router(research_api.router)
-    app.include_router(tasks_api.router)
-    app.include_router(reports_api.router)
-    app.include_router(config_api.router)
-    app.include_router(signals_api.router)
-    app.include_router(creators_api.router)
-    app.include_router(contents_api.router)
-    app.include_router(platforms_api.router)
-    app.include_router(ask_api.router)
+    # REST 路由：默认锁死，公开只留 auth/health/静态资源。
+    user_deps = [Depends(get_current_user)]
+    admin_deps = [Depends(require_admin)]
+    app.include_router(auth_api.router)
+    app.include_router(auth_api.me_router, dependencies=user_deps)
+    app.include_router(groups_api.router, dependencies=user_deps)
+    app.include_router(sources_api.router, dependencies=user_deps)
+    app.include_router(research_api.router, dependencies=user_deps)
+    app.include_router(tasks_api.router, dependencies=user_deps)
+    app.include_router(reports_api.router, dependencies=user_deps)
+    app.include_router(config_api.router, dependencies=admin_deps)
+    app.include_router(signals_api.router, dependencies=user_deps)
+    app.include_router(creators_api.router, dependencies=user_deps)
+    app.include_router(contents_api.router, dependencies=user_deps)
+    app.include_router(platforms_api.router, dependencies=user_deps)
+    app.include_router(ask_api.router, dependencies=user_deps)
 
     # 调度器管理（热重载 job 定义）
-    @app.post("/api/scheduler/reload")
+    @app.post("/api/scheduler/reload", dependencies=admin_deps)
     def reload_scheduler():
         get_scheduler().reload()
         return {"ok": True, "jobs": get_scheduler().list_jobs()}
 
-    @app.get("/api/scheduler/jobs")
+    @app.get("/api/scheduler/jobs", dependencies=admin_deps)
     def list_jobs():
         return get_scheduler().list_jobs()
 

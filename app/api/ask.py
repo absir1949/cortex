@@ -1,5 +1,5 @@
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import select
 
 from app.api.schemas import (
@@ -9,6 +9,8 @@ from app.api.schemas import (
     GroupAskReq,
     GroupAskResp,
 )
+from app.auth import get_current_user
+from app.authz import assert_group_owner
 from app.db.engine import get_session
 from app.db.repos import GroupRepo
 from app.db.schema import AskConversation, AskMessage
@@ -79,16 +81,17 @@ def _ask_internal(group_id: int, req: GroupAskReq) -> dict:
 
 
 @router.post("", response_model=GroupAskResp)
-def ask_group(group_id: int, req: GroupAskReq):
+def ask_group(group_id: int, req: GroupAskReq, current_user: dict = Depends(get_current_user)):
     """基于专题内已有转录、评论和观点信号回答，不触发外部搜索。"""
+    with get_session() as s:
+        assert_group_owner(s, group_id, current_user)
     return _ask_internal(group_id, req)
 
 
 @router.get("/conversations", response_model=list[AskConversationBrief])
-def list_conversations(group_id: int):
+def list_conversations(group_id: int, current_user: dict = Depends(get_current_user)):
     with get_session() as s:
-        if not GroupRepo(s).get(group_id):
-            raise HTTPException(404, "group not found")
+        assert_group_owner(s, group_id, current_user)
         conversations = s.exec(
             select(AskConversation)
             .where(AskConversation.group_id == group_id)
@@ -118,9 +121,14 @@ def list_conversations(group_id: int):
 
 
 @router.post("/conversations", response_model=AskConversationDetail, status_code=201)
-def create_conversation(group_id: int, req: GroupAskReq):
+def create_conversation(
+    group_id: int,
+    req: GroupAskReq,
+    current_user: dict = Depends(get_current_user),
+):
     question = _question_text(req)
-    _ensure_group_exists(group_id)
+    with get_session() as s:
+        assert_group_owner(s, group_id, current_user)
     answer = _ask_internal(group_id, req)
     title = question[:80]
     with get_session() as s:
@@ -147,8 +155,13 @@ def create_conversation(group_id: int, req: GroupAskReq):
 
 
 @router.get("/conversations/{conversation_id}", response_model=AskConversationDetail)
-def get_conversation(group_id: int, conversation_id: int):
+def get_conversation(
+    group_id: int,
+    conversation_id: int,
+    current_user: dict = Depends(get_current_user),
+):
     with get_session() as s:
+        assert_group_owner(s, group_id, current_user)
         conv = s.get(AskConversation, conversation_id)
         if not conv or conv.group_id != group_id:
             raise HTTPException(404, "conversation not found")
@@ -161,8 +174,15 @@ def get_conversation(group_id: int, conversation_id: int):
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=AskConversationDetail)
-def continue_conversation(group_id: int, conversation_id: int, req: GroupAskReq):
+def continue_conversation(
+    group_id: int,
+    conversation_id: int,
+    req: GroupAskReq,
+    current_user: dict = Depends(get_current_user),
+):
     question = _question_text(req)
+    with get_session() as s:
+        assert_group_owner(s, group_id, current_user)
     _ensure_conversation_in_group(group_id, conversation_id)
     answer = _ask_internal(group_id, req)
     with get_session() as s:
