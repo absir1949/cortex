@@ -186,7 +186,12 @@ button:disabled {
 }
 
 .home-lead-signal {
-  @apply mt-10 border-l-4 border-accent py-2 pl-5 text-text;
+  @apply mt-10 flex flex-col border-l-4 border-accent py-2 pl-5 text-text;
+}
+
+.home-lead-title {
+  @apply mt-3 block text-3xl font-semibold leading-snug transition-colors hover:text-accent line-clamp-3;
+  min-height: 4.125em;
 }
 
 .home-signal-meta {
@@ -197,12 +202,24 @@ button:disabled {
   @apply transition-colors hover:text-accent;
 }
 
-.home-lead-title {
-  @apply mt-3 block text-3xl font-semibold leading-snug transition-colors hover:text-accent;
-}
-
 .home-lead-signal small {
   @apply mt-4 block text-sm text-muted;
+}
+
+/* 轮播圆点指示器 */
+.home-lead-dots {
+  @apply mt-6 flex items-center gap-2;
+}
+
+.home-lead-dot {
+  @apply h-2 w-2 rounded-full bg-border transition-all duration-300;
+  cursor: pointer;
+  padding: 0;
+  border: 0;
+}
+
+.home-lead-dot.active {
+  @apply w-6 bg-accent;
 }
 
 .home-empty-note {

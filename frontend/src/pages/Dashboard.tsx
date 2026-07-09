@@ -37,7 +37,7 @@ export default function Dashboard() {
     if (leadSignals.length <= 1) return
     const timer = window.setInterval(() => {
       setActiveLeadIndex((index) => (index + 1) % leadSignals.length)
-    }, 6000)
+    }, 9000)
     return () => window.clearInterval(timer)
   }, [leadSignals.length])
 
@@ -51,7 +51,22 @@ export default function Dashboard() {
           </div>
 
           {leadSignal ? (
-            <LeadSignalCard signal={leadSignal} />
+            <>
+              <LeadSignalCard signal={leadSignal} />
+              {leadSignals.length > 1 && (
+                <div className="home-lead-dots">
+                  {leadSignals.map((s, index) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={`home-lead-dot ${index === activeLeadIndex ? 'active' : ''}`}
+                      aria-label={`切换到第 ${index + 1} 条`}
+                      onClick={() => setActiveLeadIndex(index)}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           ) : (
             <div className="home-empty-note">
               <strong>{hasTopics ? '暂无新信号' : '暂无专题'}</strong>
