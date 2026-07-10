@@ -51,10 +51,6 @@ export default function Login() {
           </div>
         </div>
 
-        <div className="auth-copy">
-          <p>回到你的行业材料库。</p>
-        </div>
-
         <div className="auth-tabs">
           <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
             登录

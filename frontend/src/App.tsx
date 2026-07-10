@@ -12,6 +12,7 @@ import ReportView from './pages/ReportView'
 import Settings from './pages/Settings'
 import TasksList from './pages/TasksList'
 import Login from './pages/Login'
+import Landing from './pages/Landing'
 import { useAuth } from './auth/AuthContext'
 
 function NavItem({ to, label }: { to: string; label: string }) {
@@ -43,7 +44,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
     return <div className="auth-loading">正在进入听风...</div>
   }
   if (!auth.isAuthenticated) {
-    return <Navigate to="/login" replace state={{ from: location }} />
+    return <Landing />
   }
   return <>{children}</>
 }
