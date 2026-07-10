@@ -16,7 +16,7 @@ from typing import Optional
 from app.db.engine import get_session
 from app.db.repos import SignalRepo, SourceRepo
 from app.db.schema import Source, SourceContent
-from app.llm import OpenAICompatClient, LLMMessage
+from app.llm import LLMUsageContext, OpenAICompatClient, LLMMessage, chat_with_usage
 from app.services import config_service
 
 
@@ -123,7 +123,8 @@ class InsightService:
         )
 
         try:
-            raw = self.llm.chat(
+            raw = chat_with_usage(
+                self.llm,
                 [
                     LLMMessage(
                         role="system",
@@ -132,6 +133,10 @@ class InsightService:
                     LLMMessage(role="user", content=prompt_text),
                 ],
                 config=config_service.get_llm_config(),
+                usage_context=LLMUsageContext(
+                    operation="insight_cluster",
+                    group_id=group_id,
+                ),
             )
         except Exception:
             return None

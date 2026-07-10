@@ -582,6 +582,79 @@ def _mig_009_admin_paused(session: Session) -> None:
             conn.commit()
 
 
+# ============ Migration 010: LLM 用量计量 ============
+
+@register(10, "010_llm_usage_metering: LLM 真实成本与用户分摊")
+def _mig_010_llm_usage_metering(session: Session) -> None:
+    from sqlalchemy import text
+
+    engine = get_engine()
+    SQLModel.metadata.create_all(engine)
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS llm_usage_events (
+                id INTEGER PRIMARY KEY,
+                provider VARCHAR NOT NULL DEFAULT 'openai_compat',
+                base_url VARCHAR NOT NULL DEFAULT '',
+                model VARCHAR NOT NULL DEFAULT '',
+                operation VARCHAR NOT NULL DEFAULT 'unknown',
+                metering_status VARCHAR NOT NULL DEFAULT 'ok',
+                task_id VARCHAR REFERENCES tasks(id) ON DELETE SET NULL,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                group_id INTEGER REFERENCES knowledge_groups(id) ON DELETE SET NULL,
+                source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL,
+                creator_id INTEGER REFERENCES creators(id) ON DELETE SET NULL,
+                global_content_id INTEGER REFERENCES global_content(id) ON DELETE SET NULL,
+                ingest_target_id INTEGER REFERENCES ingest_targets(id) ON DELETE SET NULL,
+                conversation_id INTEGER REFERENCES ask_conversations(id) ON DELETE SET NULL,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                cached_tokens INTEGER NOT NULL DEFAULT 0,
+                reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                estimated_total_tokens INTEGER NOT NULL DEFAULT 0,
+                request_chars INTEGER NOT NULL DEFAULT 0,
+                response_chars INTEGER NOT NULL DEFAULT 0,
+                error VARCHAR,
+                created_at VARCHAR NOT NULL
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS llm_usage_allocations (
+                id INTEGER PRIMARY KEY,
+                usage_event_id INTEGER NOT NULL REFERENCES llm_usage_events(id) ON DELETE CASCADE,
+                allocation_kind VARCHAR NOT NULL DEFAULT 'direct',
+                allocation_ratio FLOAT NOT NULL DEFAULT 1.0,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                group_id INTEGER REFERENCES knowledge_groups(id) ON DELETE SET NULL,
+                source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL,
+                creator_id INTEGER REFERENCES creators(id) ON DELETE SET NULL,
+                global_content_id INTEGER REFERENCES global_content(id) ON DELETE SET NULL,
+                ingest_target_id INTEGER REFERENCES ingest_targets(id) ON DELETE SET NULL,
+                allocated_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                allocated_completion_tokens INTEGER NOT NULL DEFAULT 0,
+                allocated_total_tokens INTEGER NOT NULL DEFAULT 0,
+                allocated_cached_tokens INTEGER NOT NULL DEFAULT 0,
+                allocated_reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                allocated_estimated_total_tokens INTEGER NOT NULL DEFAULT 0,
+                created_at VARCHAR NOT NULL
+            )
+        """))
+        for table, cols in {
+            "llm_usage_events": [
+                "created_at", "operation", "model", "metering_status", "task_id",
+                "user_id", "group_id", "source_id", "creator_id", "global_content_id", "ingest_target_id",
+            ],
+            "llm_usage_allocations": [
+                "usage_event_id", "created_at", "allocation_kind", "user_id", "group_id",
+                "source_id", "creator_id", "global_content_id", "ingest_target_id",
+            ],
+        }.items():
+            for col in cols:
+                conn.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table}_{col} ON {table} ({col})"))
+        conn.commit()
+
+
 # ============ 通用运行器 ============
 
 def current_version(session: Session) -> int:

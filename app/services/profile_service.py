@@ -14,7 +14,7 @@ from typing import Optional
 from app.db.engine import get_session
 from app.db.repos import GroupRepo, SourceRepo
 from app.db.schema import Source
-from app.llm import OpenAICompatClient, LLMMessage
+from app.llm import LLMUsageContext, OpenAICompatClient, LLMMessage, chat_with_usage
 from app.storage import paths
 from app.services import config_service
 
@@ -87,6 +87,7 @@ class ProfileManager:
         summary: str,
         *,
         date: Optional[str] = None,
+        global_content_id: Optional[int] = None,
     ) -> str:
         """把新观点合并进档案。调 LLM 增量更新，返回新档案内容。
 
@@ -117,12 +118,20 @@ class ProfileManager:
             )
 
             try:
-                updated = self.llm.chat(
+                updated = chat_with_usage(
+                    self.llm,
                     [
                         LLMMessage(role="system", content="你是电商行业分析师，负责维护创作者的观点档案，只做增量合并，输出完整 markdown。"),
                         LLMMessage(role="user", content=prompt_text),
                     ],
                     config=config_service.get_llm_config(),
+                    usage_context=LLMUsageContext(
+                        operation="profile_update",
+                        group_id=source.group_id,
+                        source_id=source.id,
+                        creator_id=cid,
+                        global_content_id=global_content_id,
+                    ),
                 )
             except Exception:
                 # LLM 失败时降级：手动把新观点追加到「已讲过的点」末尾，保证不丢

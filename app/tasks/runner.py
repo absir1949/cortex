@@ -157,6 +157,8 @@ class TaskRunner:
                 )
             return
 
+        from app.runtime_context import reset_current_task_id, set_current_task_id
+        context_token = set_current_task_id(task_id)
         try:
             result = handler(task, ctx) or {}
             with get_session() as s:
@@ -169,6 +171,7 @@ class TaskRunner:
             with get_session() as s:
                 TaskRepo(s).set_status(task_id, TaskStatus.FAILED, error=err_text)
         finally:
+            reset_current_task_id(context_token)
             with self._lock:
                 self.cancel_flags.pop(task_id, None)
 

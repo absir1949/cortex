@@ -137,6 +137,9 @@ export interface AdminStats {
   tasks: number
   running_tasks: number
   failed_tasks: number
+  llm_actual_tokens_30d: number
+  llm_allocated_tokens_30d: number
+  llm_missing_events_30d: number
 }
 
 export interface AdminUserRow {
@@ -194,10 +197,57 @@ export interface AdminTaskRow {
   error: string | null
 }
 
+export interface AdminUsageOperationRow {
+  operation: string
+  model: string
+  call_count: number
+  actual_prompt_tokens: number
+  actual_completion_tokens: number
+  actual_total_tokens: number
+  cached_tokens: number
+  reasoning_tokens: number
+  missing_events: number
+  failed_events: number
+}
+
+export interface AdminUsageUserRow {
+  user_id: number | null
+  phone: string
+  nickname: string
+  allocated_total_tokens: number
+  allocated_estimated_tokens: number
+  call_count: number
+  group_count: number
+  source_count: number
+}
+
+export interface AdminUsageCreatorRow {
+  creator_id: number | null
+  creator_name: string
+  actual_total_tokens: number
+  allocated_total_tokens: number
+  allocated_estimated_tokens: number
+  call_count: number
+  user_count: number
+}
+
+export interface AdminUsageSummary {
+  actual_total_tokens_7d: number
+  actual_total_tokens_30d: number
+  allocated_total_tokens_30d: number
+  allocated_estimated_tokens_30d: number
+  missing_events_30d: number
+  failed_events_30d: number
+  by_operation: AdminUsageOperationRow[]
+  by_user: AdminUsageUserRow[]
+  by_creator: AdminUsageCreatorRow[]
+}
+
 export interface AdminOverview {
   generated_at: string
   stats: AdminStats
   users: AdminUserRow[]
   targets: AdminTargetRow[]
   tasks: AdminTaskRow[]
+  usage: AdminUsageSummary
 }

@@ -20,6 +20,8 @@
   source_content     订阅×内容关系（哪个订阅发现了哪条全局内容）
   group_content      专题级水位（group × global_content，防重复消费）
   ingest_targets     采集目标（creator/keyword 级调度单元，含状态+并发锁）
+  llm_usage_events   LLM 真实调用成本（一条记录 = 一次 provider 请求）
+  llm_usage_allocations LLM 成本分摊（一条记录 = 一个受益专题/用户份额）
   schema_version     迁移版本号
 """
 from __future__ import annotations
@@ -462,6 +464,74 @@ class IngestTarget(SQLModel, table=True):
 
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+# ---------- LLM 用量计量 ----------
+
+class LLMUsageEvent(SQLModel, table=True):
+    """一次真实 LLM provider 调用。
+
+    event 表只记录真实发生的一次请求及 provider 返回的 token 用量；
+    若 provider 没返回 usage，只记录状态和粗略估算，不把估算混入真实 token。
+    """
+    __tablename__ = "llm_usage_events"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    provider: str = Field(default="openai_compat", index=True)
+    base_url: str = ""
+    model: str = Field(default="", index=True)
+    operation: str = Field(default="unknown", index=True)
+    metering_status: str = Field(default="ok", index=True)  # ok / missing / failed
+
+    task_id: Optional[str] = Field(default=None, sa_column=Column(ForeignKey("tasks.id", ondelete="SET NULL"), index=True))
+    user_id: Optional[int] = Field(default=None, sa_column=Column(ForeignKey("users.id", ondelete="SET NULL"), index=True))
+    group_id: Optional[int] = Field(default=None, sa_column=Column(ForeignKey("knowledge_groups.id", ondelete="SET NULL"), index=True))
+    source_id: Optional[int] = Field(default=None, sa_column=Column(ForeignKey("sources.id", ondelete="SET NULL"), index=True))
+    creator_id: Optional[int] = Field(default=None, sa_column=Column(ForeignKey("creators.id", ondelete="SET NULL"), index=True))
+    global_content_id: Optional[int] = Field(default=None, sa_column=Column(ForeignKey("global_content.id", ondelete="SET NULL"), index=True))
+    ingest_target_id: Optional[int] = Field(default=None, sa_column=Column(ForeignKey("ingest_targets.id", ondelete="SET NULL"), index=True))
+    conversation_id: Optional[int] = Field(default=None, sa_column=Column(ForeignKey("ask_conversations.id", ondelete="SET NULL"), index=True))
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
+    estimated_total_tokens: int = 0
+    request_chars: int = 0
+    response_chars: int = 0
+    error: Optional[str] = None
+
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat(), index=True)
+
+
+class LLMUsageAllocation(SQLModel, table=True):
+    """一次 LLM 调用的分摊份额。
+
+    共享采集场景下，event 只算一次真实成本；allocation 按受益专题拆给用户看。
+    """
+    __tablename__ = "llm_usage_allocations"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    usage_event_id: int = Field(sa_column=Column(ForeignKey("llm_usage_events.id", ondelete="CASCADE"), index=True, nullable=False))
+    allocation_kind: str = Field(default="direct", index=True)  # direct / shared
+    allocation_ratio: float = 1.0
+
+    user_id: Optional[int] = Field(default=None, sa_column=Column(ForeignKey("users.id", ondelete="SET NULL"), index=True))
+    group_id: Optional[int] = Field(default=None, sa_column=Column(ForeignKey("knowledge_groups.id", ondelete="SET NULL"), index=True))
+    source_id: Optional[int] = Field(default=None, sa_column=Column(ForeignKey("sources.id", ondelete="SET NULL"), index=True))
+    creator_id: Optional[int] = Field(default=None, sa_column=Column(ForeignKey("creators.id", ondelete="SET NULL"), index=True))
+    global_content_id: Optional[int] = Field(default=None, sa_column=Column(ForeignKey("global_content.id", ondelete="SET NULL"), index=True))
+    ingest_target_id: Optional[int] = Field(default=None, sa_column=Column(ForeignKey("ingest_targets.id", ondelete="SET NULL"), index=True))
+
+    allocated_prompt_tokens: int = 0
+    allocated_completion_tokens: int = 0
+    allocated_total_tokens: int = 0
+    allocated_cached_tokens: int = 0
+    allocated_reasoning_tokens: int = 0
+    allocated_estimated_total_tokens: int = 0
+
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat(), index=True)
 
 
 # ---------- Schema 版本号 ----------

@@ -6,17 +6,20 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlmodel import Session, select
 
 from app.auth import get_current_user
 from app.db.engine import get_session
 from app.db.repos import IngestTargetRepo, UserRepo
 from app.db.schema import (
+    Creator,
     GlobalContent,
     GroupContent,
     IngestTarget,
     KnowledgeGroup,
+    LLMUsageAllocation,
+    LLMUsageEvent,
     Report,
     Signal,
     Source,
@@ -50,6 +53,9 @@ class AdminStats(BaseModel):
     tasks: int = 0
     running_tasks: int = 0
     failed_tasks: int = 0
+    llm_actual_tokens_30d: int = 0
+    llm_allocated_tokens_30d: int = 0
+    llm_missing_events_30d: int = 0
 
 
 class AdminUserRow(BaseModel):
@@ -107,12 +113,59 @@ class AdminTaskRow(BaseModel):
     error: Optional[str] = None
 
 
+class AdminUsageOperationRow(BaseModel):
+    operation: str
+    model: str = ""
+    call_count: int = 0
+    actual_prompt_tokens: int = 0
+    actual_completion_tokens: int = 0
+    actual_total_tokens: int = 0
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
+    missing_events: int = 0
+    failed_events: int = 0
+
+
+class AdminUsageUserRow(BaseModel):
+    user_id: Optional[int] = None
+    phone: str = ""
+    nickname: str = ""
+    allocated_total_tokens: int = 0
+    allocated_estimated_tokens: int = 0
+    call_count: int = 0
+    group_count: int = 0
+    source_count: int = 0
+
+
+class AdminUsageCreatorRow(BaseModel):
+    creator_id: Optional[int] = None
+    creator_name: str = ""
+    actual_total_tokens: int = 0
+    allocated_total_tokens: int = 0
+    allocated_estimated_tokens: int = 0
+    call_count: int = 0
+    user_count: int = 0
+
+
+class AdminUsageSummary(BaseModel):
+    actual_total_tokens_7d: int = 0
+    actual_total_tokens_30d: int = 0
+    allocated_total_tokens_30d: int = 0
+    allocated_estimated_tokens_30d: int = 0
+    missing_events_30d: int = 0
+    failed_events_30d: int = 0
+    by_operation: list[AdminUsageOperationRow] = Field(default_factory=list)
+    by_user: list[AdminUsageUserRow] = Field(default_factory=list)
+    by_creator: list[AdminUsageCreatorRow] = Field(default_factory=list)
+
+
 class AdminOverviewResp(BaseModel):
     generated_at: str
     stats: AdminStats
     users: list[AdminUserRow] = Field(default_factory=list)
     targets: list[AdminTargetRow] = Field(default_factory=list)
     tasks: list[AdminTaskRow] = Field(default_factory=list)
+    usage: AdminUsageSummary = Field(default_factory=AdminUsageSummary)
 
 
 class AdminUserUpdateReq(BaseModel):
@@ -150,6 +203,15 @@ def _max_times(session, stmt) -> dict[int, str]:
         if key is not None and value:
             out[int(key)] = str(value)
     return out
+
+
+def _scalar_int(session: Session, stmt) -> int:
+    value = session.exec(stmt).one()
+    return int(value or 0)
+
+
+def _sum_int(value) -> int:
+    return int(value or 0)
 
 
 def _latest(*values: Optional[str]) -> Optional[str]:
@@ -371,6 +433,161 @@ def _has_source_error(source: Source) -> bool:
     return bool(source.last_error and source.last_error.strip())
 
 
+def _load_usage_summary(session: Session, *, cutoff_7d_iso: str, cutoff_30d_iso: str) -> AdminUsageSummary:
+    actual_7d = _scalar_int(
+        session,
+        select(func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0))
+        .where(LLMUsageEvent.created_at >= cutoff_7d_iso),
+    )
+    actual_30d = _scalar_int(
+        session,
+        select(func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0))
+        .where(LLMUsageEvent.created_at >= cutoff_30d_iso),
+    )
+    allocated_30d = _scalar_int(
+        session,
+        select(func.coalesce(func.sum(LLMUsageAllocation.allocated_total_tokens), 0))
+        .where(LLMUsageAllocation.created_at >= cutoff_30d_iso),
+    )
+    allocated_estimated_30d = _scalar_int(
+        session,
+        select(func.coalesce(func.sum(LLMUsageAllocation.allocated_estimated_total_tokens), 0))
+        .where(LLMUsageAllocation.created_at >= cutoff_30d_iso),
+    )
+    missing_30d = _count(
+        session,
+        select(func.count(LLMUsageEvent.id))
+        .where(LLMUsageEvent.created_at >= cutoff_30d_iso)
+        .where(LLMUsageEvent.metering_status == "missing"),
+    )
+    failed_30d = _count(
+        session,
+        select(func.count(LLMUsageEvent.id))
+        .where(LLMUsageEvent.created_at >= cutoff_30d_iso)
+        .where(LLMUsageEvent.metering_status == "failed"),
+    )
+
+    operation_rows: list[AdminUsageOperationRow] = []
+    op_total = func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0)
+    for row in session.exec(
+        select(
+            LLMUsageEvent.operation,
+            LLMUsageEvent.model,
+            func.count(LLMUsageEvent.id),
+            func.coalesce(func.sum(LLMUsageEvent.prompt_tokens), 0),
+            func.coalesce(func.sum(LLMUsageEvent.completion_tokens), 0),
+            op_total,
+            func.coalesce(func.sum(LLMUsageEvent.cached_tokens), 0),
+            func.coalesce(func.sum(LLMUsageEvent.reasoning_tokens), 0),
+            func.coalesce(func.sum(case((LLMUsageEvent.metering_status == "missing", 1), else_=0)), 0),
+            func.coalesce(func.sum(case((LLMUsageEvent.metering_status == "failed", 1), else_=0)), 0),
+        )
+        .where(LLMUsageEvent.created_at >= cutoff_30d_iso)
+        .group_by(LLMUsageEvent.operation, LLMUsageEvent.model)
+        .order_by(op_total.desc())
+        .limit(20)
+    ).all():
+        operation, model, calls, prompt, completion, total, cached, reasoning, missing, failed = row
+        operation_rows.append(AdminUsageOperationRow(
+            operation=operation or "unknown",
+            model=model or "",
+            call_count=_sum_int(calls),
+            actual_prompt_tokens=_sum_int(prompt),
+            actual_completion_tokens=_sum_int(completion),
+            actual_total_tokens=_sum_int(total),
+            cached_tokens=_sum_int(cached),
+            reasoning_tokens=_sum_int(reasoning),
+            missing_events=_sum_int(missing),
+            failed_events=_sum_int(failed),
+        ))
+
+    user_rows: list[AdminUsageUserRow] = []
+    user_total = func.coalesce(func.sum(LLMUsageAllocation.allocated_total_tokens), 0)
+    for row in session.exec(
+        select(
+            LLMUsageAllocation.user_id,
+            User.phone,
+            User.nickname,
+            user_total,
+            func.coalesce(func.sum(LLMUsageAllocation.allocated_estimated_total_tokens), 0),
+            func.count(func.distinct(LLMUsageAllocation.usage_event_id)),
+            func.count(func.distinct(LLMUsageAllocation.group_id)),
+            func.count(func.distinct(LLMUsageAllocation.source_id)),
+        )
+        .join(User, User.id == LLMUsageAllocation.user_id, isouter=True)
+        .where(LLMUsageAllocation.created_at >= cutoff_30d_iso)
+        .group_by(LLMUsageAllocation.user_id, User.phone, User.nickname)
+        .order_by(user_total.desc())
+        .limit(30)
+    ).all():
+        user_id, phone, nickname, total, estimated, calls, groups, sources = row
+        user_rows.append(AdminUsageUserRow(
+            user_id=user_id,
+            phone=phone or "",
+            nickname=nickname or "",
+            allocated_total_tokens=_sum_int(total),
+            allocated_estimated_tokens=_sum_int(estimated),
+            call_count=_sum_int(calls),
+            group_count=_sum_int(groups),
+            source_count=_sum_int(sources),
+        ))
+
+    actual_by_creator: dict[int, int] = {}
+    for creator_id, total in session.exec(
+        select(
+            LLMUsageEvent.creator_id,
+            func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0),
+        )
+        .where(LLMUsageEvent.created_at >= cutoff_30d_iso)
+        .where(LLMUsageEvent.creator_id.is_not(None))
+        .group_by(LLMUsageEvent.creator_id)
+    ).all():
+        if creator_id is not None:
+            actual_by_creator[int(creator_id)] = _sum_int(total)
+
+    creator_rows: list[AdminUsageCreatorRow] = []
+    creator_total = func.coalesce(func.sum(LLMUsageAllocation.allocated_total_tokens), 0)
+    for row in session.exec(
+        select(
+            LLMUsageAllocation.creator_id,
+            Creator.name,
+            creator_total,
+            func.coalesce(func.sum(LLMUsageAllocation.allocated_estimated_total_tokens), 0),
+            func.count(func.distinct(LLMUsageAllocation.usage_event_id)),
+            func.count(func.distinct(LLMUsageAllocation.user_id)),
+        )
+        .join(Creator, Creator.id == LLMUsageAllocation.creator_id, isouter=True)
+        .where(LLMUsageAllocation.created_at >= cutoff_30d_iso)
+        .where(LLMUsageAllocation.creator_id.is_not(None))
+        .group_by(LLMUsageAllocation.creator_id, Creator.name)
+        .order_by(creator_total.desc())
+        .limit(30)
+    ).all():
+        creator_id, name, total, estimated, calls, users = row
+        cid = int(creator_id) if creator_id is not None else None
+        creator_rows.append(AdminUsageCreatorRow(
+            creator_id=cid,
+            creator_name=name or (f"creator#{cid}" if cid else ""),
+            actual_total_tokens=actual_by_creator.get(cid or -1, 0),
+            allocated_total_tokens=_sum_int(total),
+            allocated_estimated_tokens=_sum_int(estimated),
+            call_count=_sum_int(calls),
+            user_count=_sum_int(users),
+        ))
+
+    return AdminUsageSummary(
+        actual_total_tokens_7d=actual_7d,
+        actual_total_tokens_30d=actual_30d,
+        allocated_total_tokens_30d=allocated_30d,
+        allocated_estimated_tokens_30d=allocated_estimated_30d,
+        missing_events_30d=missing_30d,
+        failed_events_30d=failed_30d,
+        by_operation=operation_rows,
+        by_user=user_rows,
+        by_creator=creator_rows,
+    )
+
+
 @router.get("/overview", response_model=AdminOverviewResp)
 def get_admin_overview():
     now = datetime.now()
@@ -421,6 +638,7 @@ def get_admin_overview():
         )[:50]
 
         recent_tasks = list(session.exec(select(Task).order_by(Task.created_at.desc()).limit(30)).all())
+        usage = _load_usage_summary(session, cutoff_7d_iso=cutoff_7d_iso, cutoff_30d_iso=(now - timedelta(days=30)).isoformat())
 
         stats = AdminStats(
             users=len(users),
@@ -448,6 +666,9 @@ def get_admin_overview():
                 select(func.count(Task.id)).where(Task.status.in_(["pending", "running"])),
             ),
             failed_tasks=_count(session, select(func.count(Task.id)).where(Task.status == "failed")),
+            llm_actual_tokens_30d=usage.actual_total_tokens_30d,
+            llm_allocated_tokens_30d=usage.allocated_total_tokens_30d,
+            llm_missing_events_30d=usage.missing_events_30d,
         )
 
         user_rows = [_build_user_row(user, aggregates) for user in users]
@@ -497,6 +718,7 @@ def get_admin_overview():
         users=user_rows,
         targets=target_rows,
         tasks=task_rows,
+        usage=usage,
     )
 
 

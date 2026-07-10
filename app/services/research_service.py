@@ -193,7 +193,7 @@ class ResearchService:
         # ----- 3. LLM 回答 -----
         self._progress(progress_cb, {"stage": "answering"})
         self._log(log_cb, "调 LLM 汇总回答...")
-        answer = self.knowledge.answer_question(question, usable)
+        answer = self.knowledge.answer_question(question, usable, group_id=group_id)
 
         # ----- 4. 落地报告 -----
         report_md = workspace / "report.md"

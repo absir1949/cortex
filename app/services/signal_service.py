@@ -18,7 +18,7 @@ from typing import Optional
 from app.db.engine import get_session
 from app.db.repos import SignalRepo
 from app.db.schema import Source
-from app.llm import OpenAICompatClient, LLMMessage
+from app.llm import LLMUsageContext, OpenAICompatClient, LLMMessage, chat_with_usage
 from app.services import config_service
 from app.services.profile_service import ProfileManager
 
@@ -63,12 +63,20 @@ class SignalService:
         )
 
         try:
-            raw = self.llm.chat(
+            raw = chat_with_usage(
+                self.llm,
                 [
                     LLMMessage(role="system", content="你是电商行业分析师，判断创作者内容是否带来新观点。严格按要求输出 JSON。"),
                     LLMMessage(role="user", content=prompt_text),
                 ],
                 config=config_service.get_llm_config(),
+                usage_context=LLMUsageContext(
+                    operation="signal_judge",
+                    group_id=source.group_id,
+                    source_id=source.id,
+                    creator_id=source.creator_id,
+                    global_content_id=global_content_id,
+                ),
             )
         except Exception as e:
             if raise_on_failure:
@@ -98,7 +106,13 @@ class SignalService:
         profile_updated = False
         if is_new and new_points:
             try:
-                self.profiles.update(source, new_points, summary, date=create_time)
+                self.profiles.update(
+                    source,
+                    new_points,
+                    summary,
+                    date=create_time,
+                    global_content_id=global_content_id,
+                )
                 profile_updated = True
             except Exception as e:
                 profile_error = str(e)

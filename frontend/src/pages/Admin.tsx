@@ -10,16 +10,17 @@ import {
 } from '../api/admin'
 import { useReloadScheduler, useSchedulerJobs } from '../api/scheduler'
 import { useCancelTask } from '../api/tasks'
-import type { AdminOverview, AdminTargetRow, AdminTaskRow, AdminUserRow } from '../api/types'
+import type { AdminOverview, AdminTargetRow, AdminTaskRow, AdminUsageSummary, AdminUserRow } from '../api/types'
 import Settings from './Settings'
 
-type Tab = 'overview' | 'users' | 'targets' | 'tasks' | 'system'
+type Tab = 'overview' | 'users' | 'targets' | 'tasks' | 'usage' | 'system'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: '概览' },
   { id: 'users', label: '用户' },
   { id: 'targets', label: '采集' },
   { id: 'tasks', label: '任务' },
+  { id: 'usage', label: '用量' },
   { id: 'system', label: '系统' },
 ]
 
@@ -57,6 +58,10 @@ function isTargetLocked(target: AdminTargetRow) {
 function targetStatusLabel(target: AdminTargetRow) {
   if (target.admin_paused) return '管理员暂停'
   return target.enabled ? '启用' : '停用'
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat('zh-CN').format(value || 0)
 }
 
 export default function Admin() {
@@ -107,10 +112,11 @@ export default function Admin() {
         ))}
       </nav>
 
-      {tab === 'overview' && <OverviewTab stats={data.stats} targets={data.targets} tasks={data.tasks} onGoTab={setTab} />}
+      {tab === 'overview' && <OverviewTab stats={data.stats} usage={data.usage} targets={data.targets} tasks={data.tasks} onGoTab={setTab} />}
       {tab === 'users' && <UsersTab users={data.users} onNotice={showNotice} />}
       {tab === 'targets' && <TargetsTab targets={data.targets} onNotice={showNotice} />}
       {tab === 'tasks' && <TasksTab tasks={data.tasks} onNotice={showNotice} />}
+      {tab === 'usage' && <UsageTab usage={data.usage} />}
       {tab === 'system' && <SystemTab onNotice={showNotice} />}
     </div>
   )
@@ -118,11 +124,13 @@ export default function Admin() {
 
 function OverviewTab({
   stats,
+  usage,
   targets,
   tasks,
   onGoTab,
 }: {
   stats: AdminOverview['stats']
+  usage: AdminUsageSummary
   targets: AdminTargetRow[]
   tasks: AdminTaskRow[]
   onGoTab: (tab: Tab) => void
@@ -138,6 +146,7 @@ function OverviewTab({
         <StatChip label="专题" value={stats.groups} hint={`${stats.enabled_groups} 更新中`} />
         <StatChip label="采集目标" value={stats.ingest_targets} hint={`${stats.active_targets} 启用`} />
         <StatChip label="运行任务" value={stats.running_tasks} hint={`${stats.failed_tasks} 失败`} />
+        <StatChip label="30天 Token" value={stats.llm_actual_tokens_30d} hint={`${formatNumber(usage.allocated_total_tokens_30d)} 分摊`} />
         <StatChip label="异常目标" value={stats.targets_with_error} danger={stats.targets_with_error > 0} />
         <StatChip label="异常关注" value={stats.failed_sources} danger={stats.failed_sources > 0} />
       </section>
@@ -201,7 +210,7 @@ function StatChip({
   return (
     <div className={`console-stat ${danger ? 'danger' : ''}`}>
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong>{formatNumber(value)}</strong>
       {hint && <small>{hint}</small>}
     </div>
   )
@@ -498,6 +507,148 @@ function TasksTab({ tasks, onNotice }: { tasks: AdminTaskRow[]; onNotice: (msg: 
       </div>
     </section>
   )
+}
+
+function UsageTab({ usage }: { usage: AdminUsageSummary }) {
+  return (
+    <div className="console-stack">
+      <section className="console-stat-row">
+        <StatChip label="7天真实 Token" value={usage.actual_total_tokens_7d} />
+        <StatChip label="30天真实 Token" value={usage.actual_total_tokens_30d} />
+        <StatChip label="30天分摊 Token" value={usage.allocated_total_tokens_30d} />
+        <StatChip label="未返回 usage" value={usage.missing_events_30d} danger={usage.missing_events_30d > 0} />
+        <StatChip label="调用失败" value={usage.failed_events_30d} danger={usage.failed_events_30d > 0} />
+      </section>
+
+      <section className="card">
+        <div className="console-section-head">
+          <h2>动作真实成本</h2>
+          <span className="text-muted text-sm">按 provider 返回 token 统计</span>
+        </div>
+        <div className="console-table-wrap">
+          <table className="table console-table">
+            <thead>
+              <tr>
+                <th>动作</th>
+                <th>模型</th>
+                <th>调用</th>
+                <th>Prompt</th>
+                <th>Completion</th>
+                <th>总 Token</th>
+                <th>异常</th>
+              </tr>
+            </thead>
+            <tbody>
+              {usage.by_operation.length === 0 && <tr><td colSpan={7} className="text-muted text-center py-4">暂无用量</td></tr>}
+              {usage.by_operation.map((row) => (
+                <tr key={`${row.operation}-${row.model}`}>
+                  <td><strong>{operationLabel(row.operation)}</strong></td>
+                  <td className="text-xs text-muted">{row.model || '-'}</td>
+                  <td>{formatNumber(row.call_count)}</td>
+                  <td>{formatNumber(row.actual_prompt_tokens)}</td>
+                  <td>{formatNumber(row.actual_completion_tokens)}</td>
+                  <td><strong>{formatNumber(row.actual_total_tokens)}</strong></td>
+                  <td className="text-xs">
+                    {row.missing_events || row.failed_events
+                      ? `${row.missing_events} 未计量 · ${row.failed_events} 失败`
+                      : '-'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div className="console-grid-2">
+        <section className="card">
+          <div className="console-section-head">
+            <h2>用户分摊</h2>
+            <span className="text-muted text-sm">共享调用按受益专题均分</span>
+          </div>
+          <div className="console-table-wrap">
+            <table className="table console-table">
+              <thead>
+                <tr>
+                  <th>用户</th>
+                  <th>分摊 Token</th>
+                  <th>调用</th>
+                  <th>范围</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usage.by_user.length === 0 && <tr><td colSpan={4} className="text-muted text-center py-4">暂无用量</td></tr>}
+                {usage.by_user.map((row) => (
+                  <tr key={row.user_id ?? row.phone}>
+                    <td>
+                      <strong>{row.nickname || row.phone || '-'}</strong>
+                      {row.phone && <div className="text-xs text-muted">{row.phone}</div>}
+                    </td>
+                    <td>
+                      <strong>{formatNumber(row.allocated_total_tokens)}</strong>
+                      {row.allocated_total_tokens === 0 && row.allocated_estimated_tokens > 0 && (
+                        <div className="text-xs text-muted">估算 {formatNumber(row.allocated_estimated_tokens)}</div>
+                      )}
+                    </td>
+                    <td>{formatNumber(row.call_count)}</td>
+                    <td className="text-xs text-muted">{row.group_count} 专题 · {row.source_count} 关注</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="console-section-head">
+            <h2>博主成本</h2>
+            <span className="text-muted text-sm">信号与档案更新归属</span>
+          </div>
+          <div className="console-table-wrap">
+            <table className="table console-table">
+              <thead>
+                <tr>
+                  <th>博主</th>
+                  <th>真实 Token</th>
+                  <th>分摊 Token</th>
+                  <th>用户</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usage.by_creator.length === 0 && <tr><td colSpan={4} className="text-muted text-center py-4">暂无博主用量</td></tr>}
+                {usage.by_creator.map((row) => (
+                  <tr key={row.creator_id ?? row.creator_name}>
+                    <td><strong>{row.creator_name || '-'}</strong></td>
+                    <td>{formatNumber(row.actual_total_tokens)}</td>
+                    <td>
+                      <strong>{formatNumber(row.allocated_total_tokens)}</strong>
+                      {row.allocated_total_tokens === 0 && row.allocated_estimated_tokens > 0 && (
+                        <div className="text-xs text-muted">估算 {formatNumber(row.allocated_estimated_tokens)}</div>
+                      )}
+                    </td>
+                    <td className="text-xs text-muted">{row.user_count} 用户 · {row.call_count} 调用</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+  )
+}
+
+function operationLabel(operation: string) {
+  const labels: Record<string, string> = {
+    ask_answer: '问听风',
+    insight_cluster: '洞察聚类',
+    profile_update: '观点档案',
+    report_merge: '报告合并',
+    report_source_batch: '报告整理',
+    research_answer: '追问研究',
+    signal_judge: '信号判定',
+  }
+  return labels[operation] || operation || 'unknown'
 }
 
 function SystemTab({ onNotice }: { onNotice: (msg: string) => void }) {

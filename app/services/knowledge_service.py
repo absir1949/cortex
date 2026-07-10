@@ -10,7 +10,7 @@ from sqlmodel import select
 from app.db.engine import get_session
 from app.db.repos import AnalyzedRepo, GroupContentRepo, GroupRepo, ReportRepo, SignalRepo, SourceContentRepo, SourceRepo
 from app.db.schema import GlobalContent, Report
-from app.llm import OpenAICompatClient, LLMMessage
+from app.llm import LLMUsageContext, OpenAICompatClient, LLMMessage, chat_with_usage
 from app.models.group import ReportKind
 from app.services import config_service
 from app.storage import paths
@@ -136,6 +136,8 @@ class KnowledgeService:
         self,
         question: str,
         evidence: list[dict],
+        *,
+        group_id: Optional[int] = None,
     ) -> str:
         """按需研究用的 LLM 调用
         evidence = [{content_id, url, author, title, transcript?, comments: [{author, text, likes}]}]
@@ -145,12 +147,17 @@ class KnowledgeService:
         evidence_block = self._build_evidence_block(evidence)
         prompt = template.format(question=question, evidence_block=evidence_block)
 
-        return self.llm.chat(
+        return chat_with_usage(
+            self.llm,
             [
                 LLMMessage(role="system", content="你是电商行业分析师，基于证据回答问题，严谨并标注来源。"),
                 LLMMessage(role="user", content=prompt),
             ],
             config=llm_config,
+            usage_context=LLMUsageContext(
+                operation="research_answer",
+                group_id=group_id,
+            ),
         )
 
     def answer_group_question(
@@ -196,7 +203,8 @@ class KnowledgeService:
 
         prompt = self._build_group_ask_prompt(question, evidence_pool)
         try:
-            answer = self.llm.chat(
+            answer = chat_with_usage(
+                self.llm,
                 [
                     LLMMessage(
                         role="system",
@@ -208,6 +216,10 @@ class KnowledgeService:
                     LLMMessage(role="user", content=prompt),
                 ],
                 config=config_service.get_llm_config(),
+                usage_context=LLMUsageContext(
+                    operation="ask_answer",
+                    group_id=group_id,
+                ),
             )
         except Exception as e:
             raise RuntimeError(f"问听风失败：{e}") from e
@@ -559,12 +571,19 @@ class KnowledgeService:
             parts_block=parts_block[:16000],  # 防止超长
         )
         try:
-            return self.llm.chat(
+            return chat_with_usage(
+                self.llm,
                 [
                     LLMMessage(role="system", content="你是电商行业的知识整理专家。把多份分批整理合并成一份连贯的总结，去重并按话题重组。"),
                     LLMMessage(role="user", content=prompt),
                 ],
                 config=config_service.get_llm_config(),
+                usage_context=LLMUsageContext(
+                    operation="report_merge",
+                    group_id=source.group_id,
+                    source_id=source.id,
+                    creator_id=source.creator_id,
+                ),
             )
         except Exception:
             return None
@@ -583,12 +602,19 @@ class KnowledgeService:
         )
 
         try:
-            return self.llm.chat(
+            return chat_with_usage(
+                self.llm,
                 [
                     LLMMessage(role="system", content="你是电商行业的知识整理专家，保留细节、不要空洞概括。"),
                     LLMMessage(role="user", content=prompt),
                 ],
                 config=config_service.get_llm_config(),
+                usage_context=LLMUsageContext(
+                    operation="report_source_batch",
+                    group_id=source.group_id,
+                    source_id=source.id,
+                    creator_id=source.creator_id,
+                ),
             )
         except Exception:
             return None

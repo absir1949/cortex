@@ -68,7 +68,8 @@ class TestFreshMigration:
         inspector = inspect(migrated_db)
         tables = set(inspector.get_table_names())
         for expected in ["users", "global_content", "source_content",
-                         "group_content", "ingest_targets", "knowledge_groups"]:
+                         "group_content", "ingest_targets", "knowledge_groups",
+                         "llm_usage_events", "llm_usage_allocations"]:
             assert expected in tables, f"missing table: {expected}"
 
     def test_default_admin_created(self, migrated_db):
