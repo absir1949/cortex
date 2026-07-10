@@ -16,5 +16,4 @@ creators.json
 tests/
 scripts/
 frontend/node_modules/
-frontend/dist/
 app/web/static/

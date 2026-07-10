@@ -11,12 +11,13 @@ set -euo pipefail
 #   2. 备份远端 .env/state
 #   3. rsync 同步代码到 122（排除运行时数据和本地依赖）
 #   4. 在 122 上生成 JWT_SECRET（如果缺）
-#   5. docker compose build + 重启
+#   5. docker compose build + 重启（FORCE_NO_CACHE=1 时强制全量构建）
 #   6. 等服务启动，健康检查
 
 REMOTE_USER="${REMOTE_USER:-ab}"
 REMOTE_HOST="${REMOTE_HOST:-192.168.2.122}"
 REMOTE_DIR="${REMOTE_DIR:-/home/ab/cortex}"
+FORCE_NO_CACHE="${FORCE_NO_CACHE:-0}"
 LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new)
 
@@ -108,7 +109,11 @@ echo "✓ JWT_SECRET 已确认"
 # 5. docker build + 重启
 echo ""
 echo "[5/6] Docker build + 重启..."
-ssh_remote "cd '${REMOTE_DIR}' && docker compose down && docker compose build --no-cache && docker compose up -d"
+BUILD_ARGS=""
+if [ "${FORCE_NO_CACHE}" = "1" ]; then
+  BUILD_ARGS="--no-cache"
+fi
+ssh_remote "cd '${REMOTE_DIR}' && docker compose down && docker compose build ${BUILD_ARGS} && docker compose up -d"
 echo "✓ Docker 已重启"
 
 # 6. 健康检查
