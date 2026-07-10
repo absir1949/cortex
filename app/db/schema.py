@@ -446,6 +446,7 @@ class IngestTarget(SQLModel, table=True):
     kind: str = Field(index=True)        # "creator" | "keyword"
     target_key: str = Field(index=True)  # creator: sec_uid；keyword: normalized query
     enabled: bool = Field(default=True)  # 无订阅时 False，scheduler 跳过；新订阅回来时 True
+    admin_paused: bool = Field(default=False)  # 管理员手动暂停调度，recompute 不覆盖
 
     # 合并后的采集参数（取所有订阅该 target 的 Source 的最激进值）
     interval_hours: int = 48

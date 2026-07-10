@@ -13,6 +13,7 @@ import Settings from './pages/Settings'
 import TasksList from './pages/TasksList'
 import Login from './pages/Login'
 import Landing from './pages/Landing'
+import Admin from './pages/Admin'
 import { useAuth } from './auth/AuthContext'
 
 function NavItem({ to, label }: { to: string; label: string }) {
@@ -72,7 +73,7 @@ function AppShell({
           <nav className="top-nav">
             <NavItem to="/" label="今日" />
             <NavItem to="/topics" label="专题" />
-            {isAdmin && <NavItem to="/settings" label="设置" />}
+            {isAdmin && <NavItem to="/admin" label="后台" />}
           </nav>
           <div className="account-chip">
             <span>{userLabel}</span>
@@ -94,6 +95,7 @@ function AppShell({
           <Route path="/tasks" element={<TasksList />} />
           <Route path="/tasks/:id" element={<TaskProgress />} />
           <Route path="/reports/:id" element={<ReportView />} />
+          {isAdmin && <Route path="/admin" element={<Admin />} />}
           {isAdmin && <Route path="/settings" element={<Settings />} />}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

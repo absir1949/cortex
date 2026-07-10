@@ -1746,6 +1746,14 @@ button:disabled {
     @apply max-w-xl;
   }
 
+  .console-stat-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .console-grid-2 {
+    @apply grid-cols-1;
+  }
+
   .listening-row-actions,
   .listening-edit {
     @apply justify-start;
@@ -1784,6 +1792,10 @@ button:disabled {
   .listening-hero h1,
   .home-edition h1 {
     @apply text-3xl;
+  }
+
+  .console-stat-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .daily-copy p,
@@ -1857,6 +1869,124 @@ button:disabled {
   .scope-stats {
     @apply grid-cols-1;
   }
+}
+
+/* ============ 管理后台（控制台） ============ */
+
+.console-page {
+  @apply mx-auto max-w-6xl space-y-4;
+}
+
+.console-header {
+  @apply flex items-start justify-between gap-4 border-b border-border pb-4;
+}
+
+.console-header h1 {
+  @apply text-2xl font-semibold;
+}
+
+.console-subtitle {
+  @apply mt-1 text-sm text-muted;
+}
+
+.console-header-actions {
+  @apply flex items-center gap-3;
+}
+
+.console-notice {
+  @apply text-sm text-accent;
+}
+
+.console-tabs {
+  @apply flex flex-wrap gap-2 border-b border-border pb-3;
+}
+
+.console-tab {
+  @apply rounded-md border border-transparent px-3 py-1.5 text-sm text-muted transition-colors hover:text-text;
+}
+
+.console-tab.active {
+  @apply border-border bg-panel text-text;
+}
+
+.console-stack {
+  @apply space-y-4;
+}
+
+.console-section-head {
+  @apply mb-4 flex items-center justify-between gap-3;
+}
+
+.console-section-head h2 {
+  @apply text-lg font-semibold;
+}
+
+.console-toolbar {
+  @apply flex items-center gap-2;
+}
+
+.console-stat-row {
+  @apply grid gap-3;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.console-stat {
+  @apply rounded-lg border border-border bg-panel px-3 py-3;
+}
+
+.console-stat span,
+.console-stat small {
+  @apply block text-xs text-muted;
+}
+
+.console-stat strong {
+  @apply mt-1 block text-2xl font-semibold leading-none;
+}
+
+.console-stat small {
+  @apply mt-1;
+}
+
+.console-stat.danger strong {
+  @apply text-danger;
+}
+
+.console-grid-2 {
+  @apply grid gap-4;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.console-table-wrap {
+  @apply overflow-x-auto;
+}
+
+.console-table {
+  @apply min-w-[720px];
+}
+
+.console-row-actions {
+  @apply flex flex-wrap gap-2;
+}
+
+.console-inline-form {
+  @apply flex flex-col gap-2 min-w-[160px];
+}
+
+.console-issue-list {
+  @apply space-y-3 text-sm;
+}
+
+.console-issue-list li {
+  @apply border-b border-border/70 pb-3 last:border-b-0 last:pb-0;
+}
+
+.console-issue-list strong,
+.console-issue-list a {
+  @apply block font-semibold;
+}
+
+.console-issue-list span {
+  @apply mt-1 block text-xs text-muted;
 }
 
 /* ============ 落地页 ============ */

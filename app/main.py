@@ -37,6 +37,7 @@ from app.api import creators as creators_api
 from app.api import contents as contents_api
 from app.api import platforms as platforms_api
 from app.api import ask as ask_api
+from app.api import admin as admin_api
 from app.api import auth as auth_api
 from app.auth import get_current_user, require_admin
 from app.tasks import get_runner
@@ -119,6 +120,7 @@ def create_app() -> FastAPI:
     app.include_router(contents_api.router, dependencies=user_deps)
     app.include_router(platforms_api.router, dependencies=user_deps)
     app.include_router(ask_api.router, dependencies=user_deps)
+    app.include_router(admin_api.router, dependencies=admin_deps)
 
     # 调度器管理（热重载 job 定义）
     @app.post("/api/scheduler/reload", dependencies=admin_deps)

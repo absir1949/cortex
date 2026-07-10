@@ -116,3 +116,88 @@ export interface Signal {
   title?: string
   group_name?: string
 }
+
+export interface AdminStats {
+  users: number
+  active_users: number
+  groups: number
+  enabled_groups: number
+  sources: number
+  active_sources: number
+  failed_sources: number
+  ingest_targets: number
+  active_targets: number
+  targets_with_error: number
+  global_content: number
+  group_content: number
+  recent_content_7d: number
+  signals: number
+  new_signals: number
+  reports: number
+  tasks: number
+  running_tasks: number
+  failed_tasks: number
+}
+
+export interface AdminUserRow {
+  id: number
+  phone: string
+  nickname: string
+  role: string
+  plan: string
+  expires_at: string | null
+  group_count: number
+  source_count: number
+  active_source_count: number
+  failed_source_count: number
+  content_count: number
+  signal_count: number
+  new_signal_count: number
+  report_count: number
+  task_count: number
+  last_activity_at: string | null
+  created_at: string
+}
+
+export interface AdminTargetRow {
+  id: number
+  platform: string
+  kind: string
+  target_key: string
+  enabled: boolean
+  admin_paused: boolean
+  subscriber_count: number
+  group_count: number
+  interval_hours: number
+  days: number
+  content_limit: number
+  comment_top_n: number
+  last_check: string | null
+  last_error: string | null
+  running_task_id: string | null
+  locked_at: string | null
+  updated_at: string | null
+}
+
+export interface AdminTaskRow {
+  id: string
+  kind: string
+  status: string
+  group_id: number | null
+  group_name: string
+  source_id: number | null
+  source_name: string
+  owner_phone: string
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+  error: string | null
+}
+
+export interface AdminOverview {
+  generated_at: string
+  stats: AdminStats
+  users: AdminUserRow[]
+  targets: AdminTargetRow[]
+  tasks: AdminTaskRow[]
+}

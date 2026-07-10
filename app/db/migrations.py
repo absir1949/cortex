@@ -424,6 +424,14 @@ def _mig_008_shared_ingest_runtime(session: Session) -> None:
     session.commit()
 
     # 2. Sources -> IngestTarget，按 target 聚合并取最激进参数。
+    # 确保 admin_paused 列存在（migration 009 才正式加，这里提前补防 INSERT 失败）
+    inspector = inspect(get_engine())
+    target_cols = {c["name"] for c in inspector.get_columns("ingest_targets")}
+    if "admin_paused" not in target_cols:
+        with get_engine().connect() as conn:
+            conn.execute(text("ALTER TABLE ingest_targets ADD COLUMN admin_paused BOOLEAN NOT NULL DEFAULT 0"))
+            conn.commit()
+
     target_rows = session.execute(text("""
         SELECT
             platform,
@@ -463,10 +471,10 @@ def _mig_008_shared_ingest_runtime(session: Session) -> None:
         else:
             session.execute(text("""
                 INSERT INTO ingest_targets (
-                    platform, kind, target_key, enabled, interval_hours, days, content_limit, comment_top_n,
+                    platform, kind, target_key, enabled, admin_paused, interval_hours, days, content_limit, comment_top_n,
                     last_check, last_error, created_at, updated_at
                 ) VALUES (
-                    :platform, :kind, :target_key, :enabled, :interval_hours, :days, :content_limit, :comment_top_n,
+                    :platform, :kind, :target_key, :enabled, 0, :interval_hours, :days, :content_limit, :comment_top_n,
                     :last_check, :last_error, :now, :now
                 )
             """), payload)
@@ -557,6 +565,21 @@ def _mig_008_shared_ingest_runtime(session: Session) -> None:
             WHERE global_content_id IS NOT NULL
         """))
         conn.commit()
+
+
+# ============ Migration 009: 采集目标管理员暂停 ============
+
+@register(9, "009_admin_paused: ingest_targets 管理员暂停调度标记")
+def _mig_009_admin_paused(session: Session) -> None:
+    from sqlalchemy import inspect, text
+
+    engine = get_engine()
+    inspector = inspect(engine)
+    cols = {c["name"] for c in inspector.get_columns("ingest_targets")}
+    if "admin_paused" not in cols:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE ingest_targets ADD COLUMN admin_paused BOOLEAN NOT NULL DEFAULT 0"))
+            conn.commit()
 
 
 # ============ 通用运行器 ============

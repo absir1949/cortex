@@ -294,6 +294,13 @@ class IngestTargetRepo:
         target = self.session.get(IngestTarget, target_id)
         if not target:
             raise ValueError(f"ingest target {target_id} not found")
+        if target.admin_paused:
+            target.enabled = False
+            target.updated_at = _now()
+            self.session.add(target)
+            self.session.commit()
+            self.session.refresh(target)
+            return target
         sources = self.sources_for_target(target_id, enabled_only=True)
         if not sources:
             target.enabled = False
@@ -403,3 +410,34 @@ class IngestTargetRepo:
         self.session.add(target)
         self.session.commit()
         return True
+
+    def clear_lock_and_error(self, target_id: int) -> Optional[IngestTarget]:
+        target = self.session.get(IngestTarget, target_id)
+        if not target:
+            return None
+        target.last_error = None
+        target.running_task_id = None
+        target.locked_at = None
+        target.updated_at = _now()
+        self.session.add(target)
+        self.session.commit()
+        self.session.refresh(target)
+        return target
+
+    def set_admin_paused(self, target_id: int, paused: bool) -> Optional[IngestTarget]:
+        target = self.session.get(IngestTarget, target_id)
+        if not target:
+            return None
+        target.admin_paused = paused
+        target.updated_at = _now()
+        self.session.add(target)
+        self.session.commit()
+        self.session.refresh(target)
+        if paused:
+            target.enabled = False
+            target.updated_at = _now()
+            self.session.add(target)
+            self.session.commit()
+            self.session.refresh(target)
+            return target
+        return self.recompute_params(target_id)
