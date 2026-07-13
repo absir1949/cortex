@@ -1,6 +1,29 @@
 import { useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { useReport } from '../api/reports'
+import { getAuthToken } from '../api/client'
+
+function downloadReport(reportId: number, format: 'md' | 'json') {
+  const token = getAuthToken()
+  fetch(`/api/reports/${reportId}/download?format=${format}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+    .then((res) => {
+      if (!res.ok) throw new Error('下载失败')
+      return res.blob()
+    })
+    .then((blob) => {
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `report_${reportId}.${format}`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    })
+    .catch(() => alert('下载失败，请重试'))
+}
 
 export default function ReportView() {
   const { id } = useParams()
@@ -17,19 +40,30 @@ export default function ReportView() {
         </div>
         <h1 className="text-2xl font-semibold">{report.title}</h1>
         <div className="flex gap-2 mt-2">
-          <a
-            href={`/api/reports/${report.id}/download?format=md`}
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(report.content_md || '').then(
+                () => alert('已复制全文'),
+                () => alert('复制失败'),
+              )
+            }}
+            className="btn-ghost text-xs"
+          >
+            复制全文
+          </button>
+          <button
+            onClick={() => downloadReport(report.id, 'md')}
             className="btn-ghost text-xs"
           >
             下载 MD
-          </a>
+          </button>
           {report.content_json_path && (
-            <a
-              href={`/api/reports/${report.id}/download?format=json`}
+            <button
+              onClick={() => downloadReport(report.id, 'json')}
               className="btn-ghost text-xs"
             >
               下载 JSON
-            </a>
+            </button>
           )}
         </div>
       </div>
