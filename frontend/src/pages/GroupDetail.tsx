@@ -155,6 +155,9 @@ function InsightsPane({
   days: number
   isFetching: boolean
 }) {
+  const periodLabel = insights?.period?.start && insights?.period?.end
+    ? `${insights.period.start} 至 ${insights.period.end}`
+    : null
   return (
     <>
       <section className="reader-block topic-tab-panel">
@@ -162,8 +165,13 @@ function InsightsPane({
           <div>
             <h2>洞察</h2>
           </div>
-          <span className="reader-tag">{insights?.generated_at ? formatTime(insights.generated_at) : `近 ${days} 天`}</span>
+          <span className="reader-tag">{periodLabel || (insights?.generated_at ? formatTime(insights.generated_at) : `近 ${days} 天`)}</span>
         </div>
+        {insights?.overview && (
+          <div className="insight-overview">
+            <ReactMarkdown>{insights.overview}</ReactMarkdown>
+          </div>
+        )}
         {trends.length > 0 ? (
           <div className="insight-stack">
             {trends.map((t) => (

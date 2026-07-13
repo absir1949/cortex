@@ -166,7 +166,12 @@ def get_group_insights(
     return {
         "trends": list(insights.get("trends") or []),
         "raw_signal_count": int(insights.get("raw_signal_count") or 0),
+        "creator_count": int(insights.get("creator_count") or 0),
         "days": int(insights.get("days") or days or 14),
+        "overview": insights.get("overview") or "",
+        "questions": list(insights.get("questions") or []),
+        "period": insights.get("period"),
+        "basis": insights.get("basis") or "report_snapshot",
         "report_id": report.id,
         "report_title": report.title,
         "generated_at": report.created_at,

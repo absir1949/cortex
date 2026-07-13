@@ -637,6 +637,8 @@ function UsageTab({ usage }: { usage: AdminUsageSummary }) {
 function operationLabel(operation: string) {
   const labels: Record<string, string> = {
     ask_answer: '问听风',
+    report_creator_period: '作者阶段摘要',
+    report_group_synthesis: '专题综合',
     insight_cluster: '洞察聚类',
     profile_update: '观点档案',
     report_merge: '报告合并',

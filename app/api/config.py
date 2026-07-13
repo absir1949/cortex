@@ -54,6 +54,8 @@ def update_config(req: ConfigUpdateReq):
         "research_prompt_template",
         "signal_judge_prompt_template",
         "profile_update_prompt_template",
+        "creator_period_prompt_template",
+        "group_synthesis_prompt_template",
         "insight_prompt_template",
     }
     filtered = {k: v for k, v in req.values.items() if k in allowed}
@@ -87,6 +89,8 @@ def list_prompts():
         "research_prompt_template": config_service.prompt("research_prompt_template"),
         "signal_judge_prompt_template": config_service.prompt("signal_judge_prompt_template"),
         "profile_update_prompt_template": config_service.prompt("profile_update_prompt_template"),
+        "creator_period_prompt_template": config_service.prompt("creator_period_prompt_template"),
+        "group_synthesis_prompt_template": config_service.prompt("group_synthesis_prompt_template"),
         "insight_prompt_template": config_service.prompt("insight_prompt_template"),
     }
 
@@ -98,6 +102,8 @@ def update_prompt(name: str, req: PromptUpdateReq):
         "research_prompt_template",
         "signal_judge_prompt_template",
         "profile_update_prompt_template",
+        "creator_period_prompt_template",
+        "group_synthesis_prompt_template",
         "insight_prompt_template",
     ):
         raise HTTPException(400, "unknown prompt name")

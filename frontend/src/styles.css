@@ -687,6 +687,14 @@ button:disabled {
   @apply mt-5 space-y-4;
 }
 
+.insight-overview {
+  @apply mb-5 max-w-3xl text-base leading-7 text-text;
+}
+
+.insight-overview p {
+  @apply my-0;
+}
+
 .insight-note {
   @apply border-b border-border pb-5 last:border-b-0 last:pb-0;
 }

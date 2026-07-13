@@ -74,14 +74,14 @@ class GroupRepo:
 
             self.session.exec(delete(Report).where(Report.group_id == group_id))
             self.session.exec(delete(RefreshRun).where(RefreshRun.group_id == group_id))
-            self.session.exec(delete(Signal).where(Signal.group_id == group_id, Signal.global_content_id.is_(None)))
+            self.session.exec(delete(Signal).where(Signal.group_id == group_id))
             self.session.exec(delete(ContentItem).where(ContentItem.group_id == group_id))
             self.session.exec(delete(GroupContent).where(GroupContent.group_id == group_id))
 
             if source_ids:
                 self.session.exec(delete(SourceContent).where(SourceContent.source_id.in_(source_ids)))
                 self.session.exec(delete(RefreshRun).where(RefreshRun.source_id.in_(source_ids)))
-                self.session.exec(delete(Signal).where(Signal.source_id.in_(source_ids), Signal.global_content_id.is_(None)))
+                self.session.exec(delete(Signal).where(Signal.source_id.in_(source_ids)))
                 self.session.exec(delete(ContentItem).where(ContentItem.source_id.in_(source_ids)))
                 self.session.exec(delete(AnalyzedContent).where(AnalyzedContent.source_id.in_(source_ids)))
                 self.session.exec(delete(Task).where(Task.source_id.in_(source_ids)))

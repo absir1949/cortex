@@ -7,11 +7,11 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.db.engine import get_engine
-from app.db.schema import AskConversation, AskMessage, KnowledgeGroup, Source
+from app.db.schema import AskConversation, AskMessage, GlobalContent, GroupContent, KnowledgeGroup, Source, SourceContent
 from app.db.repos import GroupRepo, SourceRepo, SignalRepo
 from app.models.group import SourceType
 from app.services.knowledge_service import KnowledgeService
-from app.storage.fs import StorageManager
+from app.storage.fs import GlobalStorage
 from tests.auth_helpers import auth_headers
 
 
@@ -37,22 +37,32 @@ def _make_group_with_material():
             display_name="张三",
             directory="ask-test/a1",
         ))
+        global_item = GlobalContent(
+            platform="douyin",
+            content_id="c1",
+            creator_id=source.creator_id,
+            title="低价之后怎么做",
+            url="https://example.com/c1",
+            author_name="张三",
+            create_time="2026-07-08T10:00:00",
+        )
+        s.add(global_item)
+        s.commit()
+        s.refresh(global_item)
+        s.add(SourceContent(source_id=source.id, global_content_id=global_item.id))
+        s.add(GroupContent(group_id=group.id, global_content_id=global_item.id))
+        s.commit()
         SignalRepo(s).create(
             source.id,
             "c1",
+            global_content_id=global_item.id,
             group_id=group.id,
             is_new=True,
             summary="张三强调低价供给正在转向内容种草",
             new_points=["低价供给转内容种草", "达人会更看重可讲故事的品"],
         )
-        group_id, source_id = group.id, source.id
-    storage = StorageManager("ask-test/a1")
-    storage.save_metadata("c1", {
-        "content_id": "c1",
-        "title": "低价之后怎么做",
-        "url": "https://example.com/c1",
-        "create_time": "2026-07-08T10:00:00",
-    })
+        group_id, source_id, creator_id = group.id, source.id, source.creator_id
+    storage = GlobalStorage("douyin", creator_id)
     storage.save_transcript("c1", "不要只卷低价，接下来要把商品讲成内容，达人种草才会带动转化。", "2026-07-08T10:00:00")
     storage.save_comments("c1", [{"author": "观众", "text": "内容种草确实比单纯低价稳", "likes": 3}], "2026-07-08T10:00:00")
     return group_id, source_id

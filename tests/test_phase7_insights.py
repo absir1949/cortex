@@ -10,10 +10,10 @@ from __future__ import annotations
 import json
 import pytest
 from pathlib import Path
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.db.engine import get_engine
-from app.db.schema import KnowledgeGroup, Report, Source, Signal
+from app.db.schema import GlobalContent, GroupContent, KnowledgeGroup, Report, Source, Signal, SourceContent
 from app.db.repos import GroupRepo, SourceRepo, SignalRepo
 from app.models.group import ReportKind, SourceType
 from app.services.insight_service import InsightService
@@ -46,10 +46,49 @@ def _make_group_with_sources(slug: str = "insight-test"):
         return group.id, src1.id, src2.id
 
 
-def _add_signal(source_id, group_id, content_id, summary, new_points, is_new=True):
+def _add_signal(source_id, group_id, content_id, summary, new_points, is_new=True, global_content_id=None):
     with _session() as s:
-        SignalRepo(s).create(source_id, content_id, group_id=group_id,
-                             is_new=is_new, summary=summary, new_points=new_points)
+        SignalRepo(s).create(
+            source_id,
+            content_id,
+            global_content_id=global_content_id,
+            group_id=group_id,
+            is_new=is_new,
+            summary=summary,
+            new_points=new_points,
+        )
+
+
+def _add_group_content(group_id, source_id, content_id, *, title, create_time, is_new=None, summary="", new_points=None):
+    with _session() as s:
+        src = s.get(Source, source_id)
+        global_item = GlobalContent(
+            platform=src.platform,
+            content_id=content_id,
+            creator_id=src.creator_id,
+            title=title,
+            author_name=src.display_name,
+            url=f"https://example.com/{content_id}",
+            create_time=create_time,
+        )
+        s.add(global_item)
+        s.commit()
+        s.refresh(global_item)
+        s.add(SourceContent(source_id=source_id, global_content_id=global_item.id))
+        s.add(GroupContent(group_id=group_id, global_content_id=global_item.id))
+        s.commit()
+        gid = global_item.id
+    if is_new is not None:
+        _add_signal(
+            source_id,
+            group_id,
+            content_id,
+            summary,
+            new_points or [],
+            is_new=is_new,
+            global_content_id=gid,
+        )
+    return gid
 
 
 # ---------- 配置项 & prompt ----------
@@ -262,30 +301,32 @@ def test_system_int_handles_invalid_config():
 
 # ---------- 修复点验证：报告只消费已完成 Signal ----------
 
-def test_collect_new_items_distinguishes_unjudged_from_repeat(monkeypatch):
+def test_collect_new_group_items_distinguishes_unjudged_from_repeat(monkeypatch):
     """没有 signal 记录的内容不进入报告，避免绕过观点档案状态机"""
     from app.services.knowledge_service import KnowledgeService
-    from app.storage.fs import StorageManager
 
     grp, s1, _ = _make_group_with_sources(slug="three-state")
-    # 造一条已转录的内容（但 DB 里没有对应的 Signal 记录 = 判定失败）
-    storage = StorageManager(f"three-state/a1")
-    storage.save_transcript("c-unjudged", "这是一段转录", create_time="2026-07-01T10:00:00")
-    storage.save_metadata("c-unjudged", {
-        "content_id": "c-unjudged", "title": "未判定的内容",
-        "create_time": "2026-07-01T10:00:00",
-    })
-    # 造一条有 signal 且 is_new=False 的内容（真正的老调重弹）
-    storage.save_transcript("c-repeat", "另一段转录", create_time="2026-07-01T11:00:00")
-    storage.save_metadata("c-repeat", {
-        "content_id": "c-repeat", "title": "老调重弹内容",
-        "create_time": "2026-07-01T11:00:00",
-    })
-    _add_signal(s1, grp, "c-repeat", "重复观点", ["x"], is_new=False)
+    _add_group_content(
+        grp,
+        s1,
+        "c-unjudged",
+        title="未判定的内容",
+        create_time="2026-07-01T10:00:00",
+    )
+    _add_group_content(
+        grp,
+        s1,
+        "c-repeat",
+        title="老调重弹内容",
+        create_time="2026-07-01T11:00:00",
+        is_new=False,
+        summary="重复观点",
+        new_points=["x"],
+    )
 
     with _session() as s:
         src = SourceRepo(s).get(s1)
-    items = KnowledgeService()._collect_new_items(src)
+    items = KnowledgeService()._collect_new_group_items(grp, [src])[src.id]
     item_map = {it["content_id"]: it for it in items}
 
     # 未判定的内容：等待刷新流水线补判定，不进入报告
@@ -298,44 +339,151 @@ def test_collect_new_items_distinguishes_unjudged_from_repeat(monkeypatch):
 def test_analyze_group_unjudged_does_not_go_to_deep_analysis(monkeypatch):
     """未判定内容不应被报告兜底深度分析；应等待刷新流水线补 Signal"""
     from app.services.knowledge_service import KnowledgeService
-    from app.storage.fs import StorageManager
 
     grp, s1, _ = _make_group_with_sources(slug="undjudged-flow")
-    # 只造一条未判定内容（无 signal 记录）
-    storage = StorageManager(f"undjudged-flow/a1")
-    storage.save_transcript("c1", "转录内容", create_time="2026-07-01T10:00:00")
-    storage.save_metadata("c1", {
-        "content_id": "c1", "title": "未判定", "create_time": "2026-07-01T10:00:00",
-    })
+    _add_group_content(
+        grp,
+        s1,
+        "c1",
+        title="未判定",
+        create_time="2026-07-01T10:00:00",
+    )
 
-    # mock _analyze_source / _summarize_repeats 都不应被调用
-    analyze_called = {"v": False}
-    summarize_called = {"v": False}
-    orig_analyze = KnowledgeService._analyze_source
-    orig_summarize = KnowledgeService._summarize_repeats
+    summary_called = {"v": False}
 
-    def spy_analyze(self, source, items):
-        analyze_called["v"] = True
-        # 确认传进来的是未判定内容
-        assert all(not it.get("is_new_signal") for it in items)
-        return "深度分析结果"
+    def spy_summary(self, source, items):
+        summary_called["v"] = True
+        return {"analysis": "不应生成"}
 
-    def spy_summarize(source, items):
-        summarize_called["v"] = True
-        return "汇总"
-
-    monkeypatch.setattr(KnowledgeService, "_analyze_source", spy_analyze)
-    monkeypatch.setattr(KnowledgeService, "_summarize_repeats", spy_summarize)
-    # 跳过跨源提炼和报告写盘
-    monkeypatch.setattr(KnowledgeService, "_write_report", lambda self, *a, **k: (Path("/tmp/x.md"), Path("/tmp/x.json")))
-
-    from app.db.schema import Report
-    monkeypatch.setattr("app.db.repos.ReportRepo.create", lambda self, r: type("R", (), {"id": 1})())
+    monkeypatch.setattr(KnowledgeService, "_build_creator_period_summary", spy_summary)
 
     result = KnowledgeService().analyze_group(grp)
     assert result["report_id"] is None
-    assert analyze_called["v"] is False
-    assert summarize_called["v"] is False
+    assert summary_called["v"] is False
+
+
+def test_report_uses_signal_cards_not_raw_transcript(monkeypatch):
+    """整理报告应消费 Signal 卡片和观点档案，不重新把原始转录送给 LLM。"""
+    from app.services.knowledge_service import KnowledgeService
+    from app.storage.fs import GlobalStorage
+
+    grp, s1, _ = _make_group_with_sources(slug="signal-card-report")
+    gid = _add_group_content(
+        grp,
+        s1,
+        "c-new",
+        title="信号卡片内容",
+        create_time="2026-07-01T10:00:00",
+        is_new=True,
+        summary="这条内容贡献了信号卡片摘要",
+        new_points=["新增观点A"],
+    )
+    with _session() as s:
+        global_item = s.get(GlobalContent, gid)
+    storage = GlobalStorage(global_item.platform, global_item.creator_id)
+    storage.save_transcript(
+        "c-new",
+        "RAW_TRANSCRIPT_SHOULD_NOT_APPEAR 这里是很长的原始转录",
+        create_time="2026-07-01T10:00:00",
+    )
+
+    captured: list[str] = []
+    svc = KnowledgeService()
+
+    def fake_chat(messages, *, config):
+        captured.extend(m.content for m in messages)
+        return "### 本期变化\n基于信号卡片整理。"
+
+    monkeypatch.setattr(svc.llm, "chat", fake_chat)
+    result = svc.analyze_group(grp)
+
+    assert result["report_id"] is not None
+    prompt = "\n".join(captured)
+    assert "新增观点A" in prompt
+    assert "信号卡片内容" in prompt
+    assert "RAW_TRANSCRIPT_SHOULD_NOT_APPEAR" not in prompt
+
+
+def test_report_creator_period_failure_does_not_mark_analyzed(monkeypatch):
+    """作者阶段摘要失败就让报告失败，不生成假摘要、不消费水位。"""
+    from app.services.knowledge_service import KnowledgeService
+
+    grp, s1, _ = _make_group_with_sources(slug="creator-period-fail")
+    gid = _add_group_content(
+        grp,
+        s1,
+        "c-new",
+        title="失败内容",
+        create_time="2026-07-01T10:00:00",
+        is_new=True,
+        summary="有新观点",
+        new_points=["新增观点A"],
+    )
+
+    svc = KnowledgeService()
+    monkeypatch.setattr(svc.llm, "chat", lambda messages, *, config: (_ for _ in ()).throw(RuntimeError("llm down")))
+
+    with pytest.raises(RuntimeError, match="llm down"):
+        svc.analyze_group(grp)
+
+    with _session() as s:
+        row = s.exec(
+            select(GroupContent).where(
+                GroupContent.group_id == grp,
+                GroupContent.global_content_id == gid,
+            )
+        ).one()
+    assert row.analyzed_at is None
+
+
+def test_report_group_synthesis_invalid_json_fails_without_marking(monkeypatch):
+    """专题综合不是 JSON 时不回退成假洞察，整份报告失败且水位不动。"""
+    from app.services.knowledge_service import KnowledgeService
+
+    grp, s1, s2 = _make_group_with_sources(slug="group-synthesis-fail")
+    gid1 = _add_group_content(
+        grp,
+        s1,
+        "c-a",
+        title="作者A",
+        create_time="2026-07-01T10:00:00",
+        is_new=True,
+        summary="A 讲内容种草",
+        new_points=["内容种草"],
+    )
+    gid2 = _add_group_content(
+        grp,
+        s2,
+        "c-b",
+        title="作者B",
+        create_time="2026-07-01T11:00:00",
+        is_new=True,
+        summary="B 讲内容种草",
+        new_points=["内容种草"],
+    )
+
+    calls = {"n": 0}
+    svc = KnowledgeService()
+
+    def fake_chat(messages, *, config):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            return "### 本期变化\n作者阶段摘要"
+        return "not json"
+
+    monkeypatch.setattr(svc.llm, "chat", fake_chat)
+
+    with pytest.raises(RuntimeError, match="专题综合"):
+        svc.analyze_group(grp)
+
+    with _session() as s:
+        rows = s.exec(
+            select(GroupContent).where(
+                GroupContent.group_id == grp,
+                GroupContent.global_content_id.in_([gid1, gid2]),
+            )
+        ).all()
+    assert {row.analyzed_at for row in rows} == {None}
 
 
 # ---------- 修复点验证：insights 端点读配置默认 days ----------

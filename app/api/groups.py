@@ -14,7 +14,6 @@ from app.db.engine import get_session
 from app.db.repos import GroupContentRepo, GroupRepo, SignalRepo
 from app.db.schema import GlobalContent
 from app.models.group import TaskKind
-from app.storage.fs import StorageManager
 from app.tasks import get_runner
 
 
@@ -90,17 +89,6 @@ def list_group_summaries(
                     created = _parse_time(item.create_time)
                     if created and created >= cutoff:
                         recent_content_count += 1
-            else:
-                recent_content_ids: set[tuple[int, str]] = set()
-                for src in sources:
-                    for md in StorageManager(src.directory).list_metadata():
-                        created = _parse_time(md.get("create_time", ""))
-                        if not created or created < cutoff:
-                            continue
-                        cid = md.get("content_id") or md.get("video_id")
-                        if cid:
-                            recent_content_ids.add((src.id, cid))
-                recent_content_count = len(recent_content_ids)
             recent_signals = []
             for sig in signal_repo.list_by_group(group.id, limit=1000):
                 created = _parse_time(sig.created_at)

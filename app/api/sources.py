@@ -9,7 +9,6 @@ from app.db.engine import get_session
 from app.db.schema import GlobalContent, Signal, SourceContent
 from app.services.source_service import SourceService
 from app.models.group import TaskKind
-from app.storage.fs import StorageManager
 from app.tasks import get_runner
 
 
@@ -73,17 +72,8 @@ def list_source_summaries(
                 ).all()
                 recent_content_count = len(recent_global_ids)
             else:
-                recent_cids: set[str] = set()
-                for md in StorageManager(src.directory).list_metadata():
-                    created = _parse_time(md.get("create_time", ""))
-                    if created and created >= cutoff:
-                        cid = md.get("content_id") or md.get("video_id")
-                        if cid:
-                            recent_cids.add(cid)
-                signals = s.exec(
-                    select(Signal).where(Signal.source_id == src.id)
-                ).all()
-                recent_content_count = len(recent_cids)
+                signals = []
+                recent_content_count = 0
             recent_signals = []
             for sig in signals:
                 created = _parse_time(sig.created_at)

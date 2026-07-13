@@ -35,7 +35,12 @@ export interface Trend {
 export interface InsightResult {
   trends: Trend[]
   raw_signal_count: number
+  creator_count?: number
   days: number
+  overview?: string
+  questions?: string[]
+  period?: { start?: string; end?: string } | null
+  basis?: string
   report_id?: number | null
   report_title?: string
   generated_at?: string

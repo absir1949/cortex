@@ -99,6 +99,48 @@ SYSTEM_DEFAULTS: dict[str, Any] = {
         "[本次内容摘要]\n{summary}\n\n"
         "[日期]\n{date}"
     ),
+    # 作者阶段摘要：报告层只看观点档案 + 已判定的观点卡片，不重新读取原始转录。
+    "creator_period_prompt_template": (
+        "创作者「{creator_name}」本期产生了 {new_count} 条新观点信号，"
+        "{repeat_count} 条内容命中既有观点。下面给出他的长期观点档案和本期观点卡片。\n\n"
+        "请输出一份面向阅读的作者阶段摘要，要求：\n"
+        "1. 先写“本期最重要变化”，说明他相比过往观点有什么新增、升级或转向\n"
+        "2. 再按话题整理新增观点，保留具体做法、判断、数字、平台名\n"
+        "3. 对重复内容只折叠说明，不要展开成新结论\n"
+        "4. 每个重要结论后标注证据 key，例如 douyin/123\n"
+        "5. 不要使用观点卡片之外的信息，不要要求原始转录\n"
+        "6. 用中文 Markdown 输出，不要输出 JSON\n\n"
+        "[作者长期观点档案]\n{profile}\n\n"
+        "[本期新增观点卡片]\n{signal_cards_block}\n\n"
+        "[本期重复内容折叠]\n{repeat_cards_block}"
+    ),
+    # 专题综合：基于作者阶段摘要做跨作者分析，给报告和洞察页共用。
+    "group_synthesis_prompt_template": (
+        "你是听风的专题分析员。专题「{group_name}」本期有 {creator_count} 位作者、"
+        "{signal_count} 条新观点信号。下面是各作者的阶段摘要和观点卡片。\n\n"
+        "请做跨作者综合，找出这个专题本期真正值得注意的共同变化。\n\n"
+        "规则：\n"
+        "1. 只基于输入内容，不编造作者、平台规则或外部事实\n"
+        "2. 多个作者讲到同类观点时，合并成一条趋势\n"
+        "3. 单个作者的独立观点可以进入 overview，但不要放进 trends\n"
+        "4. 趋势要说明 source_names、signal_count、momentum、why_hot\n"
+        "5. 输出严格 JSON，不要 markdown 代码块\n\n"
+        "[作者阶段摘要]\n{summaries_block}\n\n"
+        "JSON 格式：\n"
+        "{{\n"
+        '  "overview": "本期专题整体结论，2-4 句",\n'
+        '  "trends": [\n'
+        "    {{\n"
+        '      "trend": "趋势名称",\n'
+        '      "source_names": ["讲到这个趋势的作者名"],\n'
+        '      "signal_count": 2,\n'
+        '      "momentum": "-> 升温 / -> 稳定 / -> 降温",\n'
+        '      "why_hot": "为什么值得关注"\n'
+        "    }}\n"
+        "  ],\n"
+        '  "questions": ["后续值得继续追踪的问题"]\n'
+        "}}"
+    ),
     # 分批整理后的合并：把多份分批整理 reduce 成一份连贯总结
     "analysis_merge_prompt_template": (
         "下面是对创作者「{creator_name}」内容的 {batch_count} 份分批整理（因为内容多，分批处理后需要合并）。"

@@ -1,4 +1,4 @@
-"""AI 知识提炼 - 视频原话 vs 观众评论分开喂给 LLM"""
+"""AI 知识提炼 - 基于观点信号和作者档案生成阶段报告"""
 from __future__ import annotations
 import json
 import re
@@ -8,25 +8,28 @@ from typing import Optional
 from sqlmodel import select
 
 from app.db.engine import get_session
-from app.db.repos import AnalyzedRepo, GroupContentRepo, GroupRepo, ReportRepo, SignalRepo, SourceContentRepo, SourceRepo
+from app.db.repos import GroupContentRepo, GroupRepo, ReportRepo, SignalRepo, SourceContentRepo, SourceRepo
 from app.db.schema import GlobalContent, Report
 from app.llm import LLMUsageContext, OpenAICompatClient, LLMMessage, chat_with_usage
 from app.models.group import ReportKind
 from app.services import config_service
+from app.services.profile_service import ProfileManager
 from app.storage import paths
-from app.storage.fs import GlobalStorage, StorageManager
+from app.storage.fs import GlobalStorage
 
 
-# 单次喂给 LLM 的文本上限
-MAX_TRANSCRIPT_CHARS = 12000
-MAX_COMMENT_CHARS = 3000
+# 报告层只消费已沉淀的结构化观点，不再回读原始转录/评论。
+MAX_PROFILE_CHARS = 6000
+MAX_SIGNAL_BLOCK_CHARS = 12000
+MAX_CREATOR_SUMMARY_BLOCK_CHARS = 16000
 
 
 class KnowledgeService:
-    """按组做增量分析：每源挑未分析过的 content，构造 prompt 喂给 LLM"""
+    """专题知识整理：Signal 卡片 -> 作者阶段摘要 -> 专题综合。"""
 
     def __init__(self):
         self.llm = OpenAICompatClient()
+        self.profiles = ProfileManager()
 
     # ============ 公开 API ============
 
@@ -45,65 +48,26 @@ class KnowledgeService:
             return None
 
         analyzed_results: list[dict] = []
-        total_new = 0
         consumed_global_ids: list[int] = []
-        global_buckets, has_group_content = self._collect_new_group_items(group_id, sources)
+        global_buckets = self._collect_new_group_items(group_id, sources)
 
         for source in sources:
-            new_items = global_buckets.get(source.id, []) if has_group_content else self._collect_new_items(source)
+            new_items = global_buckets.get(source.id, [])
             if not new_items:
                 continue
 
-            # 报告只消费已完成 Signal 的内容。未判定内容留在 content_items
-            # 由刷新流水线补跑，避免报告、信号列表、观点档案不一致。
-            signal_items = [it for it in new_items if it.get("is_new_signal")]
-            repeat_items = [it for it in new_items if not it.get("is_new_signal")]
-
-            if signal_items:
-                analysis = self._analyze_source(source, signal_items)
-            elif repeat_items:
-                # 没有新观点，只有老调重弹：生成一句简短说明，不喂大量原文给 LLM
-                analysis = self._summarize_repeats(source, repeat_items)
-            else:
+            period_summary = self._build_creator_period_summary(source, new_items)
+            if not period_summary:
                 continue
-            if not analysis:
-                continue
+            analyzed_results.append(period_summary)
 
-            new_signal_count = sum(1 for it in signal_items if it.get("is_new_signal"))
-            analyzed_results.append({
-                "name": source.display_name,
-                "analysis": analysis,
-                "new_count": len(new_items),
-                "new_signal_count": new_signal_count,
-                "repeat_count": len(repeat_items),
-                "source_id": source.id,
-            })
             # 标记已分析（只有 analysis 成功才标记）
-            if has_group_content:
-                consumed_global_ids.extend([int(it["global_content_id"]) for it in new_items if it.get("global_content_id")])
-            else:
-                with get_session() as s:
-                    AnalyzedRepo(s).mark_many(
-                        source.id,
-                        [it["content_id"] for it in new_items],
-                    )
-            total_new += new_signal_count
+            consumed_global_ids.extend([int(it["global_content_id"]) for it in new_items if it.get("global_content_id")])
 
         if not analyzed_results:
             return {"creators": [], "report_id": None, "report_path": None}
 
-        # 跨博主趋势提炼（失败不阻塞报告生成）
-        insights = None
-        try:
-            from app.services.insight_service import InsightService
-            raw_days = config_service.effective_for_group(group_id).get("insight_lookback_days", 14)
-            try:
-                days = int(raw_days)
-            except (TypeError, ValueError):
-                days = 14
-            insights = InsightService().build_group_insights(group_id, days=days)
-        except Exception:
-            insights = None
+        insights = self._build_group_synthesis(group, analyzed_results)
 
         # 落地报告
         report_md, report_json_path = self._write_report(
@@ -120,7 +84,17 @@ class KnowledgeService:
                 summary=self._make_summary(analyzed_results),
                 content_md_path=str(report_md),
                 content_json_path=str(report_json_path),
-                sources_used=[{"source_id": r["source_id"], "new_count": r["new_count"]} for r in analyzed_results],
+                sources_used=[
+                    {
+                        "source_id": r["source_id"],
+                        "creator_id": r.get("creator_id"),
+                        "new_count": r["new_count"],
+                        "new_signal_count": r.get("new_signal_count", 0),
+                        "period_start": r.get("period_start"),
+                        "period_end": r.get("period_end"),
+                    }
+                    for r in analyzed_results
+                ],
             ))
             report_id = report.id
             if consumed_global_ids:
@@ -173,25 +147,13 @@ class KnowledgeService:
             group = GroupRepo(s).get(group_id)
             if not group:
                 raise ValueError("group not found")
-            sources = SourceRepo(s).list_by_group(group_id)
-            source_map = {src.id: src for src in sources}
-            signals = SignalRepo(s).list_by_group(group_id, limit=500)
 
         evidence_pool = self._collect_group_evidence_global(
             group_id,
-            source_map,
             question=question,
             days=days,
             limit=limit,
         )
-        if not evidence_pool:
-            evidence_pool = self._collect_group_evidence(
-                source_map,
-                signals,
-                question=question,
-                days=days,
-                limit=limit,
-            )
         if not evidence_pool:
             return {
                 "answer": "这个专题里还没有可用于回答的转录、评论或观点信号。先刷新专题，等内容进入知识库后再问会更准。",
@@ -290,80 +252,9 @@ class KnowledgeService:
                 continue
         return None
 
-    def _collect_group_evidence(
-        self,
-        source_map: dict[int, object],
-        signals: list,
-        *,
-        question: str,
-        days: int,
-        limit: int,
-    ) -> list[dict]:
-        signal_map = {(sig.source_id, sig.content_id): sig for sig in signals}
-        terms = self._question_terms(question)
-        cutoff = datetime.now() - timedelta(days=days)
-        candidates: list[dict] = []
-
-        for source_id, source in source_map.items():
-            storage = StorageManager(source.directory)
-            for md in storage.list_metadata():
-                cid = md.get("content_id") or md.get("video_id")
-                if not cid:
-                    continue
-                created = self._parse_time(md.get("create_time", ""))
-                if created and created < cutoff:
-                    continue
-                transcript = storage.get_transcript(cid) or ""
-                comments = storage.get_comments(cid) or []
-                sig = signal_map.get((source_id, cid))
-                if not transcript and not comments and not sig:
-                    continue
-
-                comment_text = "\n".join((c.get("text", "") or "") for c in comments[:12])
-                signal_summary = sig.summary if sig else ""
-                new_points = list(sig.new_points or []) if sig else []
-                searchable = "\n".join([
-                    md.get("title", ""),
-                    signal_summary,
-                    "\n".join(new_points),
-                    transcript,
-                    comment_text,
-                ]).lower()
-                term_score = sum(1 for t in terms if t and t in searchable)
-                signal_score = 2 if sig and sig.is_new else (1 if sig else 0)
-                recency_score = 0
-                if created:
-                    age_days = max(0, (datetime.now() - created).days)
-                    recency_score = max(0, days - age_days) / max(days, 1)
-                score = term_score * 3 + signal_score + recency_score
-                if not terms:
-                    score += recency_score
-
-                snippet_source = transcript or comment_text or signal_summary
-                candidates.append({
-                    "score": score,
-                    "content_id": cid,
-                    "source_id": source_id,
-                    "author": source.display_name,
-                    "title": md.get("title", ""),
-                    "url": md.get("url", ""),
-                    "create_time": md.get("create_time", ""),
-                    "transcript": transcript,
-                    "comments": comments,
-                    "signal_summary": signal_summary,
-                    "new_points": new_points,
-                    "snippet": snippet_source[:220].replace("\n", " "),
-                })
-
-        candidates.sort(key=lambda ev: (ev["score"], ev.get("create_time", "")), reverse=True)
-        positive = [ev for ev in candidates if ev["score"] > 0]
-        selected = positive[:limit] if positive else candidates[:limit]
-        return selected
-
     def _collect_group_evidence_global(
         self,
         group_id: int,
-        source_map: dict[int, object],
         *,
         question: str,
         days: int,
@@ -439,16 +330,13 @@ class KnowledgeService:
         positive = [ev for ev in candidates if ev["score"] > 0]
         return positive[:limit] if positive else candidates[:limit]
 
-    def _collect_new_group_items(self, group_id: int, sources: list) -> tuple[dict[int, list[dict]], bool]:
+    def _collect_new_group_items(self, group_id: int, sources: list) -> dict[int, list[dict]]:
         """从 GroupContent 水位收集本专题未分析内容，并按 source 分桶。
-
-        返回第二个 bool 表示新水位表是否已有数据；没有数据时调用方回退旧链路。
         """
         with get_session() as s:
             group_contents = GroupContentRepo(s).list_unanalyzed_by_group(group_id, limit=500)
             if not group_contents:
-                existing_ids = GroupContentRepo(s).list_global_ids_by_group(group_id, limit=1)
-                return {}, bool(existing_ids)
+                return {}
             source_content_repo = SourceContentRepo(s)
             source_by_id = {src.id: src for src in sources}
             buckets: dict[int, list[dict]] = {}
@@ -467,16 +355,14 @@ class KnowledgeService:
                 source = linked_sources[0] if linked_sources else None
                 if source is None or source.id not in source_by_id:
                     continue
-                storage = GlobalStorage(global_item.platform, global_item.creator_id)
-                transcript = storage.get_transcript(global_item.content_id)
-                if not transcript:
-                    continue
                 buckets.setdefault(source.id, []).append({
                     "global_content_id": global_item.id,
+                    "platform": global_item.platform,
+                    "creator_id": global_item.creator_id,
                     "content_id": global_item.content_id,
                     "title": global_item.title,
-                    "transcript": transcript,
-                    "comments": storage.get_comments(global_item.content_id) or [],
+                    "url": global_item.url,
+                    "author_name": global_item.author_name,
                     "create_time": global_item.create_time,
                     "has_signal": True,
                     "is_new_signal": bool(sig.is_new),
@@ -484,7 +370,7 @@ class KnowledgeService:
                     "signal_new_points": list(sig.new_points or []),
                     "signal_matched_points": list(sig.matched_points or []),
                 })
-        return buckets, True
+        return buckets
 
     @classmethod
     def _build_group_ask_prompt(cls, question: str, evidence: list[dict]) -> str:
@@ -500,124 +386,151 @@ class KnowledgeService:
             "4. 不要提外部资料，不要把没有证据的判断写成事实。"
         )
 
-    def _collect_new_items(self, source) -> list[dict]:
-        """从该源目录读已转录且已完成 Signal 的 content，过滤掉已分析项。"""
-        with get_session() as s:
-            analyzed = AnalyzedRepo(s).get_analyzed_ids(source.id)
-            # 查 Signal 表：哪些 content 带新观点
-            sig_map = {}
-            for sig in SignalRepo(s).list_by_source(source.id, limit=500):
-                sig_map[sig.content_id] = sig
-        storage = StorageManager(source.directory)
-        new_items: list[dict] = []
-        for md in storage.list_metadata():
-            cid = md.get("content_id") or md.get("video_id")
-            if not cid or cid in analyzed:
-                continue
-            transcript = storage.get_transcript(cid)
-            if not transcript:
-                continue
-            sig = sig_map.get(cid)
-            if sig is None:
-                continue
-            new_items.append({
-                "content_id": cid,
-                "title": md.get("title", ""),
-                "transcript": transcript,
-                "comments": storage.get_comments(cid) or [],
-                "create_time": md.get("create_time", ""),
-                "has_signal": True,
-                "is_new_signal": bool(sig.is_new),
-                "signal_summary": sig.summary,
-                "signal_new_points": list(sig.new_points),
-                "signal_matched_points": list(sig.matched_points),
+    def _build_creator_period_summary(self, source, items: list[dict]) -> Optional[dict]:
+        """把本期内容压成作者阶段摘要。
+
+        输入必须已经完成 Signal 判定；这里不读取原始转录，避免报告层重复消耗。
+        """
+        cards = self._build_signal_cards(source, items)
+        if not cards:
+            return None
+
+        new_cards = [card for card in cards if card["is_new_signal"]]
+        repeat_cards = [card for card in cards if not card["is_new_signal"]]
+        if new_cards:
+            analysis = self._summarize_creator_period(source, new_cards, repeat_cards)
+        else:
+            analysis = self._summarize_repeats(source, items)
+        if not analysis:
+            raise RuntimeError(f"作者阶段摘要为空: source_id={source.id}")
+
+        dates = [card["create_time"][:10] for card in cards if card.get("create_time")]
+        period_start = min(dates) if dates else None
+        period_end = max(dates) if dates else None
+        return {
+            "name": source.display_name,
+            "source_id": source.id,
+            "creator_id": source.creator_id,
+            "analysis": analysis,
+            "new_count": len(cards),
+            "new_signal_count": len(new_cards),
+            "repeat_count": len(repeat_cards),
+            "period_start": period_start,
+            "period_end": period_end,
+            "signal_cards": cards,
+            "evidence_global_ids": [
+                int(card["global_content_id"])
+                for card in cards
+                if card.get("global_content_id") is not None
+            ],
+        }
+
+    def _summarize_creator_period(self, source, new_cards: list[dict], repeat_cards: list[dict]) -> Optional[str]:
+        profile = self.profiles.load(source)[:MAX_PROFILE_CHARS]
+        template = config_service.prompt("creator_period_prompt_template")
+        prompt = template.format(
+            creator_name=source.display_name,
+            profile=profile,
+            new_count=len(new_cards),
+            repeat_count=len(repeat_cards),
+            signal_cards_block=self._build_signal_cards_block(new_cards),
+            repeat_cards_block=self._build_repeat_cards_block(repeat_cards),
+        )
+        text = chat_with_usage(
+            self.llm,
+            [
+                LLMMessage(
+                    role="system",
+                    content=(
+                        "你是听风的作者观点分析员。你只基于作者观点档案和本期观点卡片做阶段摘要，"
+                        "不要要求原始转录，不要编造卡片外证据。"
+                    ),
+                ),
+                LLMMessage(role="user", content=prompt),
+            ],
+            config=config_service.get_llm_config(),
+            usage_context=LLMUsageContext(
+                operation="report_creator_period",
+                group_id=source.group_id,
+                source_id=source.id,
+                creator_id=source.creator_id,
+            ),
+        ).strip()
+        if not text:
+            raise RuntimeError(f"作者阶段摘要 LLM 返回为空: source_id={source.id}")
+        return text
+
+    @staticmethod
+    def _build_signal_cards(source, items: list[dict]) -> list[dict]:
+        cards: list[dict] = []
+        for it in items:
+            new_points = [str(p).strip() for p in (it.get("signal_new_points") or []) if str(p).strip()]
+            matched_points = [str(p).strip() for p in (it.get("signal_matched_points") or []) if str(p).strip()]
+            summary = str(it.get("signal_summary") or "").strip()
+            content_id = str(it.get("content_id") or "")
+            platform = str(it.get("platform") or getattr(source, "platform", "") or "")
+            cards.append({
+                "global_content_id": it.get("global_content_id"),
+                "platform": platform,
+                "content_id": content_id,
+                "evidence_key": f"{platform}/{content_id}" if platform else content_id,
+                "source_id": getattr(source, "id", None),
+                "creator_id": getattr(source, "creator_id", None) or it.get("creator_id"),
+                "source_name": getattr(source, "display_name", "") or it.get("author_name") or "",
+                "title": str(it.get("title") or "").strip(),
+                "url": str(it.get("url") or "").strip(),
+                "create_time": str(it.get("create_time") or "").strip(),
+                "is_new_signal": bool(it.get("is_new_signal")),
+                "summary": summary,
+                "new_points": new_points,
+                "matched_points": matched_points,
             })
-        return new_items
+        return sorted(cards, key=lambda card: card.get("create_time") or "")
 
-    def _analyze_source(self, source, items: list[dict]) -> Optional[str]:
-        """构造 prompt 喂 LLM。内容过多时分批分析，再 reduce 合并成一份连贯整理。"""
-        BATCH = 8  # 每批最多分析 8 条，避免单次 LLM 调用输入过长超时
-        if not items:
-            return None
-
-        # 少于一批直接分析
-        if len(items) <= BATCH:
-            return self._analyze_one_batch(source, items)
-
-        # 分批分析
+    @staticmethod
+    def _build_signal_cards_block(cards: list[dict]) -> str:
         parts: list[str] = []
-        for i in range(0, len(items), BATCH):
-            batch = items[i:i + BATCH]
-            r = self._analyze_one_batch(source, batch)
-            if r:
-                parts.append(r)
-        if not parts:
-            return None
-        # 只有一批成功，直接返回
-        if len(parts) == 1:
-            return parts[0]
-        # 多批 → reduce 合并成一份连贯整理
-        return self._merge_batches(source, parts) or "\n\n---\n\n".join(parts)
+        for i, card in enumerate(cards, 1):
+            lines = [
+                f"### 卡片 {i}: {card.get('title') or card.get('content_id') or '无标题'}",
+                f"- 时间: {card.get('create_time') or '未知'}",
+                f"- 证据: {card.get('evidence_key') or card.get('content_id')}",
+            ]
+            if card.get("summary"):
+                lines.append(f"- 单条摘要: {card['summary']}")
+            if card.get("new_points"):
+                lines.append("- 新增观点:")
+                lines.extend(f"  - {p}" for p in card["new_points"])
+            if card.get("matched_points"):
+                lines.append("- 命中旧观点:")
+                lines.extend(f"  - {p}" for p in card["matched_points"][:5])
+            parts.append("\n".join(lines))
+        block = "\n\n".join(parts)
+        return block[:MAX_SIGNAL_BLOCK_CHARS]
 
-    def _merge_batches(self, source, parts: list[str]) -> Optional[str]:
-        """把多份分批整理合并成一份连贯总结"""
-        parts_block = "\n\n---\n\n".join(
-            f"【整理 {i}】\n{p}" for i, p in enumerate(parts, 1)
-        )
-        template = config_service.prompt("analysis_merge_prompt_template")
-        prompt = template.format(
-            creator_name=source.display_name,
-            batch_count=len(parts),
-            parts_block=parts_block[:16000],  # 防止超长
-        )
-        try:
-            return chat_with_usage(
-                self.llm,
-                [
-                    LLMMessage(role="system", content="你是电商行业的知识整理专家。把多份分批整理合并成一份连贯的总结，去重并按话题重组。"),
-                    LLMMessage(role="user", content=prompt),
-                ],
-                config=config_service.get_llm_config(),
-                usage_context=LLMUsageContext(
-                    operation="report_merge",
-                    group_id=source.group_id,
-                    source_id=source.id,
-                    creator_id=source.creator_id,
-                ),
-            )
-        except Exception:
-            return None
-
-    def _analyze_one_batch(self, source, items: list[dict]) -> Optional[str]:
-        """分析单批内容"""
-        transcripts_block = self._build_transcripts_block(items)
-        comments_block = self._build_comments_block(items)
-
-        template = config_service.prompt("analysis_prompt_template")
-        prompt = template.format(
-            creator_name=source.display_name,
-            content_count=len(items),
-            transcripts_block=transcripts_block,
-            comments_block=comments_block or "（无评论）",
-        )
-
-        try:
-            return chat_with_usage(
-                self.llm,
-                [
-                    LLMMessage(role="system", content="你是电商行业的知识整理专家，保留细节、不要空洞概括。"),
-                    LLMMessage(role="user", content=prompt),
-                ],
-                config=config_service.get_llm_config(),
-                usage_context=LLMUsageContext(
-                    operation="report_source_batch",
-                    group_id=source.group_id,
-                    source_id=source.id,
-                    creator_id=source.creator_id,
-                ),
-            )
-        except Exception:
-            return None
+    @staticmethod
+    def _build_repeat_cards_block(cards: list[dict]) -> str:
+        if not cards:
+            return "（无重复内容）"
+        points: list[str] = []
+        titles: list[str] = []
+        for card in cards:
+            title = card.get("title") or card.get("content_id")
+            if title and title not in titles:
+                titles.append(title)
+            for p in card.get("matched_points") or []:
+                if p not in points:
+                    points.append(p)
+            if len(points) >= 8 and len(titles) >= 8:
+                break
+        lines = [f"本期 {len(cards)} 条内容命中既有观点，报告中折叠处理。"]
+        if points:
+            lines.append("重复/延续的观点：")
+            lines.extend(f"- {p}" for p in points[:8])
+        if titles:
+            lines.append("涉及内容：")
+            lines.extend(f"- {t}" for t in titles[:8])
+        return "\n".join(lines)
 
     @staticmethod
     def _summarize_repeats(source, items: list[dict]) -> str:
@@ -643,39 +556,152 @@ class KnowledgeService:
             lines.append(f"涉及内容：{titles}{' 等' if len(items) > 5 else ''}")
         return "\n".join(lines)
 
-    @staticmethod
-    def _build_transcripts_block(items: list[dict]) -> str:
-        parts: list[str] = []
-        for i, it in enumerate(items, 1):
-            title = (it.get("title") or "").strip()
-            text = (it.get("transcript") or "").strip()
-            header = f"【作品 {i}】{title}" if title else f"【作品 {i}】"
-            parts.append(f"{header}\n{text}")
-        full = "\n\n---\n\n".join(parts)
-        if len(full) > MAX_TRANSCRIPT_CHARS:
-            full = full[:MAX_TRANSCRIPT_CHARS] + "\n\n...（原话过长已截断）"
-        return full
+    def _build_group_synthesis(self, group, results: list[dict]) -> Optional[dict]:
+        """基于本次报告的作者阶段摘要做专题综合。
+
+        这一步只看本期水位内的新观点卡片和作者摘要，保证洞察和报告一致。
+        """
+        new_cards = [
+            card
+            for result in results
+            for card in result.get("signal_cards", [])
+            if card.get("is_new_signal")
+        ]
+        if not new_cards:
+            return None
+
+        period = self._period_from_cards([
+            card
+            for result in results
+            for card in result.get("signal_cards", [])
+        ])
+        source_names = {
+            str(card.get("source_name") or "")
+            for card in new_cards
+            if card.get("source_name")
+        }
+        if len(new_cards) < 2 or len(source_names) < 2:
+            return None
+
+        summaries_block = self._build_creator_summaries_block(results)
+        template = config_service.prompt("group_synthesis_prompt_template")
+        prompt = template.format(
+            group_name=getattr(group, "name", "") or str(getattr(group, "id", "")),
+            creator_count=len(source_names),
+            signal_count=len(new_cards),
+            summaries_block=summaries_block,
+        )
+        raw = chat_with_usage(
+            self.llm,
+            [
+                LLMMessage(
+                    role="system",
+                    content=(
+                        "你是听风的专题分析员。你只基于本期作者阶段摘要做跨作者综合，"
+                        "输出严格 JSON，不编造未出现的作者或证据。"
+                    ),
+                ),
+                LLMMessage(role="user", content=prompt),
+            ],
+            config=config_service.get_llm_config(),
+            usage_context=LLMUsageContext(
+                operation="report_group_synthesis",
+                group_id=getattr(group, "id", None),
+            ),
+        )
+
+        parsed = self._parse_json(raw)
+        if not parsed:
+            raise RuntimeError("专题综合 LLM 返回不是合法 JSON")
+
+        trends = []
+        for trend in parsed.get("trends") or []:
+            if not isinstance(trend, dict):
+                continue
+            source_list = self._as_str_list(trend.get("source_names"))
+            try:
+                count = int(float(trend.get("signal_count") or len(source_list)))
+            except (TypeError, ValueError):
+                count = len(source_list)
+            trends.append({
+                "trend": str(trend.get("trend") or "").strip(),
+                "source_names": source_list,
+                "signal_count": count,
+                "momentum": str(trend.get("momentum") or "-> 稳定").strip(),
+                "why_hot": str(trend.get("why_hot") or "").strip(),
+            })
+        trends = [t for t in trends if t["trend"]]
+        return {
+            "overview": str(parsed.get("overview") or "").strip(),
+            "trends": trends,
+            "questions": self._as_str_list(parsed.get("questions")),
+            "raw_signal_count": len(new_cards),
+            "creator_count": len(source_names),
+            "period": period,
+            "basis": "creator_period_summaries",
+        }
 
     @staticmethod
-    def _build_comments_block(items: list[dict]) -> str:
+    def _build_creator_summaries_block(results: list[dict]) -> str:
         parts: list[str] = []
-        for i, it in enumerate(items, 1):
-            comments = it.get("comments") or []
-            if not comments:
+        for result in results:
+            cards = [card for card in result.get("signal_cards", []) if card.get("is_new_signal")]
+            if not cards:
                 continue
-            sub = [f"【作品 {i} 评论】"]
-            for c in comments[:10]:
-                author = c.get("author", "")
-                text = c.get("text", "")
-                likes = c.get("likes", 0)
-                sub.append(f"  - 👍{likes} @{author}: {text}")
-                for r in (c.get("replies") or [])[:3]:
-                    sub.append(f"    └ @{r.get('author', '')}: {r.get('text', '')}")
-            parts.append("\n".join(sub))
-        full = "\n\n".join(parts)
-        if len(full) > MAX_COMMENT_CHARS:
-            full = full[:MAX_COMMENT_CHARS] + "\n...（评论过长已截断）"
-        return full
+            lines = [
+                f"## {result.get('name')}",
+                f"- 本期新信号: {result.get('new_signal_count', 0)}",
+                f"- 本期重复: {result.get('repeat_count', 0)}",
+                f"- 覆盖时间: {result.get('period_start') or '未知'} 至 {result.get('period_end') or '未知'}",
+                "",
+                str(result.get("analysis") or "").strip(),
+                "",
+                "本期观点卡片：",
+            ]
+            for card in cards[:10]:
+                lines.append(f"- {card.get('evidence_key')}: {card.get('summary') or card.get('title')}")
+                for point in (card.get("new_points") or [])[:3]:
+                    lines.append(f"  - {point}")
+            parts.append("\n".join(lines))
+        block = "\n\n---\n\n".join(parts)
+        return block[:MAX_CREATOR_SUMMARY_BLOCK_CHARS]
+
+    @staticmethod
+    def _period_from_cards(cards: list[dict]) -> Optional[dict]:
+        dates = [str(card.get("create_time") or "")[:10] for card in cards if card.get("create_time")]
+        if not dates:
+            return None
+        return {"start": min(dates), "end": max(dates)}
+
+    @staticmethod
+    def _parse_json(text: str) -> Optional[dict]:
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except Exception:
+                pass
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except Exception:
+                pass
+        return None
+
+    @staticmethod
+    def _as_str_list(value) -> list[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str) and value.strip():
+            return [value.strip()]
+        return []
 
     @staticmethod
     def _build_evidence_block(evidence: list[dict]) -> str:
@@ -721,6 +747,8 @@ class KnowledgeService:
             "",
             f"**本期新信号**：{total_new_signals} 条新观点 · {total_repeats} 条内容与既有观点重复（已折叠）",
             "",
+            "> 本报告基于已判定的观点信号和作者观点档案生成，不重复读取原始转录。",
+            "",
         ]
         refresh_lines = self._format_refresh_summary(refresh_summary)
         if refresh_lines:
@@ -752,14 +780,24 @@ class KnowledgeService:
         lines.append("*由听风自动生成*")
 
         md_path.write_text("\n".join(lines), encoding="utf-8")
+        signal_cards = [
+            card
+            for result in results
+            for card in result.get("signal_cards", [])
+        ]
         json_path.write_text(
             json.dumps({
+                "version": 2,
+                "basis": "signal_cards+creator_profiles",
                 "creators": results,
+                "creator_period_summaries": results,
+                "signal_cards": signal_cards,
                 "insights": insights,
                 "refresh": refresh_summary,
                 "stats": {
                     "new_signals": total_new_signals,
                     "repeats": total_repeats,
+                    "signal_cards": len(signal_cards),
                 },
             }, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -797,23 +835,28 @@ class KnowledgeService:
         if not insights or not insights.get("trends"):
             # 有信号但没形成趋势时，也显示一句说明（让用户知道系统做了分析）
             if insights and insights.get("raw_signal_count", 0) >= 2:
-                days = insights.get("days", 14)
+                period = insights.get("period") or {}
+                period_label = ""
+                if period.get("start") and period.get("end"):
+                    period_label = f"{period['start']} 至 {period['end']} · "
                 return [
-                    f"## 🌐 本期行业信号（近 {days} 天）",
+                    f"## 🌐 本期行业信号（{period_label}{insights.get('raw_signal_count', 0)} 条新信号）",
                     "",
-                    f"> 分析了 {insights.get('raw_signal_count', 0)} 条新信号，"
-                    "各博主观点较分散，未形成明显共同趋势。",
+                    f"> {insights.get('overview') or '各作者观点较分散，未形成明显共同趋势。'}",
                     "",
                     "---",
                 ]
             return []
         trends = insights["trends"]
-        days = insights.get("days", 14)
         raw_count = insights.get("raw_signal_count", 0)
+        period = insights.get("period") or {}
+        period_label = ""
+        if period.get("start") and period.get("end"):
+            period_label = f"{period['start']} 至 {period['end']} · "
         lines = [
-            f"## 🌐 本期行业信号（近 {days} 天 · {raw_count} 条新信号）",
+            f"## 🌐 本期行业信号（{period_label}{raw_count} 条新信号）",
             "",
-            "*多个博主同时在讲的观点，往往是正在形成的行业信号。*",
+            f"> {insights.get('overview') or '多个作者同时在讲的观点，往往是正在形成的行业信号。'}",
             "",
         ]
         for t in trends:
