@@ -1,27 +1,20 @@
 /**
- * 时间格式化工具 —— 统一转东八区（UTC+8）显示。
+ * 时间格式化工具。
  *
- * 后端存的是 datetime.now().isoformat()（无时区标记，Docker 里按 UTC 跑），
- * 页面上必须转成东八区才符合用户预期。
+ * 系统里有两类时间：
+ *   - 平台返回的时间（create_time、视频发布时间）：已经是东八区，直接显示。
+ *   - 系统生成的时间（created_at、first_seen_at）：服务器在 UTC 环境，
+ *     存的是 UTC，理论上需要 +8。
+ *
+ * 但目前后端 datetime.now() 在 Docker 里跑的是 UTC，前端无法区分一个
+ * ISO 字符串到底是 UTC 还是 CST（都没有时区后缀）。统一加 +8 会导致
+ * 平台时间被加两遍。因此暂时不做时区转换，直接格式化显示原始值。
+ *
+ * 后续如果要彻底解决：后端在写入 DB 时统一用东八区（settings 里设时区
+ * 或用 datetime.now(timezone(timedelta(hours=8)))），这样所有时间一致。
  */
 
 export function formatTime(value?: string | null): string {
   if (!value) return '-'
-  // 后端返回的 ISO 字符串没有时区后缀（如 2026-07-13T06:38:58.704168）
-  // Date 构造器会当本地时区解析，但 Docker 里是 UTC，所以手动补 +00:00 再转
-  const normalized = value.includes('+') || value.includes('Z') ? value : value + '+00:00'
-  const date = new Date(normalized)
-  if (isNaN(date.getTime())) return value.slice(0, 16).replace('T', ' ')
-  // toLocaleString 转东八区
-  const formatted = date.toLocaleString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-  // toLocaleString 输出格式 2026/07/13 14:38，统一成 2026-07-13 14:38
-  return formatted.replace(/\//g, '-')
+  return value.slice(0, 16).replace('T', ' ')
 }

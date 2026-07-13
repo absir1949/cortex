@@ -6,6 +6,10 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
+# 时区：东八区（与抖音/微信等平台时间一致，避免 datetime.now() 返回 UTC）
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && echo "Asia/Shanghai" > /etc/timezone
+
 WORKDIR /app
 
 # Python 依赖
