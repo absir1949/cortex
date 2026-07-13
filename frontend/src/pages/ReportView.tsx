@@ -3,6 +3,33 @@ import ReactMarkdown from 'react-markdown'
 import { useReport } from '../api/reports'
 import { getAuthToken } from '../api/client'
 
+function copyText(text: string) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(
+      () => alert('已复制全文'),
+      () => fallbackCopy(text),
+    )
+  } else {
+    fallbackCopy(text)
+  }
+}
+
+function fallbackCopy(text: string) {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  try {
+    document.execCommand('copy')
+    alert('已复制全文')
+  } catch {
+    alert('复制失败，请手动选择文本复制')
+  }
+  document.body.removeChild(ta)
+}
+
 function downloadReport(reportId: number, format: 'md' | 'json') {
   const token = getAuthToken()
   fetch(`/api/reports/${reportId}/download?format=${format}`, {
@@ -41,12 +68,7 @@ export default function ReportView() {
         <h1 className="text-2xl font-semibold">{report.title}</h1>
         <div className="flex gap-2 mt-2">
           <button
-            onClick={() => {
-              navigator.clipboard.writeText(report.content_md || '').then(
-                () => alert('已复制全文'),
-                () => alert('复制失败'),
-              )
-            }}
+            onClick={() => copyText(report.content_md || '')}
             className="btn-ghost text-xs"
           >
             复制全文

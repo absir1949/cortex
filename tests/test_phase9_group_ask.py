@@ -4,13 +4,16 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.db.engine import get_engine
 from app.db.schema import AskConversation, AskMessage, GlobalContent, GroupContent, KnowledgeGroup, Source, SourceContent
 from app.db.repos import GroupRepo, SourceRepo, SignalRepo
+from app.models.content import Comment, Content, ContentType
 from app.models.group import SourceType
+from app.platforms import Capability
 from app.services.knowledge_service import KnowledgeService
+from app.services.research_service import ResearchService
 from app.storage.fs import GlobalStorage
 from tests.auth_helpers import auth_headers
 
@@ -188,6 +191,123 @@ def test_group_ask_conversation_flow(monkeypatch):
     assert len(rows) == 1
     assert rows[0]["message_count"] == 4
     assert rows[0]["evidence_count"] == 1
+
+
+def test_external_ask_creates_conversation_and_enqueues_task(monkeypatch):
+    from app.main import app
+    from app.models.group import TaskKind
+    client = TestClient(app, headers=auth_headers())
+    grp, _ = _make_group_with_material()
+    calls = []
+
+    class FakeRunner:
+        def enqueue(self, kind, params=None, *, group_id=None, source_id=None):
+            calls.append({"kind": kind, "params": params or {}, "group_id": group_id, "source_id": source_id})
+            return "task-external-123"
+
+    def fail_answer(self, group_id, question, *, days=30, limit=12):
+        raise AssertionError("external ask should not call sync internal LLM")
+
+    monkeypatch.setattr("app.api.ask.get_runner", lambda: FakeRunner())
+    monkeypatch.setattr(KnowledgeService, "answer_group_question", fail_answer)
+
+    r = client.post(
+        f"/api/groups/{grp}/ask/conversations",
+        json={
+            "question": "去外面看看最近怎么说",
+            "use_internal": True,
+            "use_external": True,
+            "external_days": 5,
+            "external_limit": 8,
+            "comment_top_n": 12,
+            "platforms": ["douyin"],
+        },
+    )
+
+    assert r.status_code == 201
+    detail = r.json()
+    assert [m["role"] for m in detail["messages"]] == ["user", "assistant"]
+    task_ev = detail["messages"][1]["evidence"][0]
+    assert task_ev["kind"] == "external_search_task"
+    assert task_ev["task_id"] == "task-external-123"
+    assert calls[0]["kind"] == TaskKind.RESEARCH
+    assert calls[0]["group_id"] == grp
+    assert calls[0]["params"]["ask_conversation_id"] == detail["id"]
+    assert calls[0]["params"]["use_internal"] is True
+    assert calls[0]["params"]["days"] == 5
+    assert calls[0]["params"]["search_limit"] == 8
+
+
+def test_research_service_persists_external_material(monkeypatch):
+    grp, _ = _make_group_with_material()
+
+    class FakeSearchAdapter:
+        platform = "fake"
+
+        def capabilities(self):
+            return {Capability.SEARCH, Capability.FETCH_COMMENTS}
+
+        def has(self, cap):
+            return cap in self.capabilities()
+
+        def search(self, query, limit=20, days=7):
+            return [Content(
+                content_id="ext-1",
+                platform="fake",
+                content_type=ContentType.NOTE,
+                title="外部讨论",
+                text="外部材料正在讨论保证金变化。",
+                author_name="外部作者",
+                author_id="author-ext",
+                url="https://example.com/ext-1",
+                create_time="2026-07-09T12:00:00",
+            )]
+
+        def fetch_comments(self, content_id, top_n=20, fetch_replies=True, creator_id=""):
+            return [Comment(comment_id="cm1", author="读者", text="这个变化很重要", likes=6)]
+
+    def fake_get_adapter(platform):
+        assert platform == "fake"
+        return FakeSearchAdapter()
+
+    def fake_answer(self, question, evidence, *, group_id=None):
+        assert any(ev.get("content_id") == "ext-1" for ev in evidence)
+        assert any("外部材料" in (ev.get("text") or "") for ev in evidence)
+        return "外部搜索答案"
+
+    monkeypatch.setattr("app.services.research_service.get_adapter", fake_get_adapter)
+    monkeypatch.setattr(KnowledgeService, "answer_question", fake_answer)
+
+    result = ResearchService().run(
+        "保证金有什么变化？",
+        group_id=grp,
+        task_id="task-ext-test",
+        platforms=["fake"],
+        days=7,
+        search_limit=3,
+        comment_top_n=5,
+    )
+
+    assert result["answer"] == "外部搜索答案"
+    assert result["external_evidence_count"] == 1
+    with _session() as s:
+        global_item = s.exec(
+            select(GlobalContent).where(
+                GlobalContent.platform == "fake",
+                GlobalContent.content_id == "ext-1",
+            )
+        ).first()
+        assert global_item is not None
+        group_content = s.exec(
+            select(GroupContent).where(
+                GroupContent.group_id == grp,
+                GroupContent.global_content_id == global_item.id,
+            )
+        ).first()
+        assert group_content is not None
+    storage = GlobalStorage("fake", None)
+    assert "外部材料" in (storage.get_transcript("ext-1") or "")
+    assert storage.get_comments("ext-1")[0]["text"] == "这个变化很重要"
 
 
 def test_continue_conversation_checks_group_before_llm(monkeypatch):

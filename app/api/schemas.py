@@ -90,30 +90,29 @@ class SourceUpdateReq(BaseModel):
     comment_top_n: Optional[int] = None
 
 
-# ---------- Research ----------
-
-class ResearchReq(BaseModel):
-    question: str = Field(min_length=1, max_length=2000)
-    platforms: Optional[list[str]] = None
-    days: int = 7
-    search_limit: Optional[int] = None
-    comment_top_n: Optional[int] = None
-
-
 # ---------- Ask Tingfeng ----------
 
 class GroupAskReq(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
-    days: int = Field(default=30, ge=1, le=365)
-    limit: int = Field(default=12, ge=1, le=30)
+    use_internal: bool = True
+    use_external: bool = False
+    days: int = Field(default=365, ge=1, le=365)
+    limit: int = Field(default=20, ge=1, le=30)
+    platforms: list[str] = Field(default_factory=list)
+    external_days: int = Field(default=7, ge=1, le=365)
+    external_limit: int = Field(default=10, ge=1, le=50)
+    comment_top_n: int = Field(default=20, ge=0, le=100)
 
 
 class GroupAskEvidence(BaseModel):
-    content_id: str
+    kind: str = "content"
+    task_id: Optional[str] = None
+    status: str = ""
+    content_id: str = ""
     global_content_id: Optional[int] = None
     platform: str = ""
-    source_id: int
-    author: str
+    source_id: Optional[int] = None
+    author: str = ""
     title: str = ""
     url: str = ""
     create_time: str = ""

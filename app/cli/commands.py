@@ -133,7 +133,7 @@ def cmd_search(args):
 
 
 def cmd_research(args):
-    """按需研究（阻塞版，调试用）"""
+    """外部搜索问答（阻塞版，调试用）"""
     from app.services.group_service import GroupService
     from app.services.research_service import ResearchService
 
@@ -144,9 +144,9 @@ def cmd_research(args):
         days=args.days,
         search_limit=args.limit,
     )
-    console.print(f"[green]✓ 报告生成: {result['report_path']}[/green]")
+    console.print(f"[green]✓ 回答生成: {result['answer_path']}[/green]")
     console.print(f"证据数: {result['evidence_count']}")
-    console.print(f"\n[bold]答案预览[/bold]\n{result['answer_preview']}")
+    console.print(f"\n[bold]答案[/bold]\n{result['answer']}")
 
 
 def cmd_serve(args):
@@ -193,7 +193,7 @@ def main():
     p_search.add_argument("--days", type=int, default=7)
     p_search.set_defaults(func=cmd_search)
 
-    p_res = sub.add_parser("research", help="调试：按需研究（阻塞）")
+    p_res = sub.add_parser("research", help="调试：外部搜索问答（阻塞）")
     p_res.add_argument("question")
     p_res.add_argument("--slug", help="知识组 slug（可选）")
     p_res.add_argument("--days", type=int, default=7)

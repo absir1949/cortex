@@ -2,10 +2,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 
 export interface AskEvidence {
+  kind?: 'content' | 'external_search_task' | string
+  task_id?: string | null
+  status?: string
   content_id: string
   global_content_id?: number | null
   platform?: string
-  source_id: number
+  source_id?: number | null
   author: string
   title: string
   url: string
@@ -13,6 +16,18 @@ export interface AskEvidence {
   signal_summary: string
   new_points: string[]
   snippet: string
+}
+
+export interface AskRequest {
+  question: string
+  use_internal?: boolean
+  use_external?: boolean
+  days?: number
+  limit?: number
+  platforms?: string[]
+  external_days?: number
+  external_limit?: number
+  comment_top_n?: number
 }
 
 export interface AskMessage {
@@ -58,12 +73,19 @@ export const useAskConversation = (
     queryKey: ['ask-conversation', groupId, conversationId],
     queryFn: () => api.get<AskConversationDetail>(`/groups/${groupId}/ask/conversations/${conversationId}`),
     enabled: !!groupId && !!conversationId,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      const running = data?.messages.some((msg) =>
+        msg.evidence.some((ev) => ev.kind === 'external_search_task' && ev.status === 'running'),
+      )
+      return running ? 3000 : false
+    },
   })
 
 export const useCreateAskConversation = (groupId: number) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { question: string; days?: number; limit?: number }) =>
+    mutationFn: (body: AskRequest) =>
       api.post<AskConversationDetail>(`/groups/${groupId}/ask/conversations`, body),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['ask-conversations', groupId] })
@@ -75,7 +97,7 @@ export const useCreateAskConversation = (groupId: number) => {
 export const useContinueAskConversation = (groupId: number, conversationId: number | null | undefined) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { question: string; days?: number; limit?: number }) =>
+    mutationFn: (body: AskRequest) =>
       api.post<AskConversationDetail>(`/groups/${groupId}/ask/conversations/${conversationId}/messages`, body),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['ask-conversations', groupId] })

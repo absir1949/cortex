@@ -14,7 +14,7 @@ class SourceType(str, Enum):
 class TaskKind(str, Enum):
     INGEST = "ingest"                        # 定时订阅采集
     INGEST_TARGET = "ingest_target"          # 共享采集目标级刷新
-    RESEARCH = "research"                    # 按需研究
+    RESEARCH = "research"                    # 问听风外部搜索
     TRANSCRIBE_BACKFILL = "transcribe_backfill"
     ANALYZE = "analyze"                      # 仅生成报告（基于已采集的信号，不重新采集）
 
@@ -29,4 +29,4 @@ class TaskStatus(str, Enum):
 
 class ReportKind(str, Enum):
     SCHEDULED = "scheduled"                  # 定时订阅产出
-    RESEARCH = "research"                    # 按需研究产出
+    RESEARCH = "research"                    # 已停用：旧外部搜索报告

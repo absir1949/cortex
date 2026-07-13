@@ -1292,6 +1292,68 @@ button:disabled {
   @apply space-y-5;
 }
 
+.ask-source-line {
+  @apply -mt-1 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted;
+}
+
+.ask-source-check {
+  @apply inline-flex cursor-pointer items-center gap-1.5;
+}
+
+.ask-source-check input {
+  @apply h-3.5 w-3.5 accent-[var(--accent)];
+}
+
+.ask-search-settings {
+  @apply relative inline-flex items-center;
+}
+
+.ask-search-summary {
+  @apply border-0 bg-transparent p-0 text-xs text-muted underline-offset-4 transition-colors hover:text-accent hover:underline;
+}
+
+.ask-search-popover {
+  @apply absolute left-0 top-6 z-20 w-[360px] rounded-lg border border-border bg-panel p-4 shadow-lg;
+}
+
+.ask-source-fieldset {
+  @apply grid gap-3;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ask-source-fieldset.wide {
+  @apply flex-1;
+}
+
+.ask-source-fieldset label {
+  @apply grid gap-1 text-xs font-semibold text-muted;
+}
+
+.ask-number-field {
+  @apply flex h-8 items-center rounded-md border border-border bg-bg px-2 focus-within:border-accent;
+}
+
+.ask-number-field input {
+  @apply h-7 min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-text focus:outline-none;
+}
+
+.ask-number-field em {
+  @apply ml-1 text-xs not-italic text-muted;
+}
+
+.ask-platforms {
+  @apply mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3;
+}
+
+.ask-platform {
+  @apply h-8 rounded-md border border-border px-2.5 text-xs text-muted transition-colors hover:border-accent hover:text-accent;
+  background: #fffdf8;
+}
+
+.ask-platform.active {
+  @apply border-accent bg-accent/10 text-accent;
+}
+
 .ask-chat-form {
   @apply mt-5 space-y-3;
 }
@@ -1394,6 +1456,14 @@ button:disabled {
   @apply block rounded-lg border border-border bg-bg px-4 py-3 text-text transition-colors hover:border-accent;
 }
 
+.ask-evidence-row.task {
+  @apply border-accent/30 bg-accent/5;
+}
+
+.ask-evidence-row.task.failed {
+  @apply border-danger/30 bg-danger/10;
+}
+
 .ask-evidence-row strong {
   @apply block text-sm;
 }
@@ -1404,6 +1474,10 @@ button:disabled {
 
 .ask-evidence-row small {
   @apply mt-2 block text-xs text-muted leading-relaxed;
+}
+
+.mono-text {
+  @apply font-mono;
 }
 
 .ask-followup-form {

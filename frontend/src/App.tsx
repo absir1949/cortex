@@ -6,7 +6,6 @@ import GroupLayout from './layouts/GroupLayout'
 import GroupDetail from './pages/GroupDetail'
 import CreatorDetail from './pages/CreatorDetail'
 import ListeningManage from './pages/ListeningManage'
-import ResearchForm from './pages/ResearchForm'
 import TaskProgress from './pages/TaskProgress'
 import ReportView from './pages/ReportView'
 import Settings from './pages/Settings'
@@ -89,7 +88,6 @@ function AppShell({
           <Route path="/groups/:id" element={<GroupLayout />}>
             <Route index element={<GroupDetail />} />
             <Route path="listening" element={<ListeningManage />} />
-            <Route path="research" element={<ResearchForm />} />
           </Route>
           <Route path="/groups/:id/creators/:sid" element={<CreatorDetail />} />
           <Route path="/tasks" element={<TasksList />} />

@@ -96,7 +96,6 @@ export default function GroupLayout() {
                 <button onClick={onAnalyze} disabled={analyzeGroup.isPending}>
                   {analyzeGroup.isPending ? '整理中' : '整理报告'}
                 </button>
-                <Link to={`/groups/${gid}/research`}>追问</Link>
                 <Link to={`/groups/${gid}/listening#settings`}>更新设置</Link>
                 <Link to={`/groups/${gid}/listening`}>关注</Link>
                 <button onClick={onToggleEnabled}>{group.enabled ? '暂停专题' : '恢复专题'}</button>

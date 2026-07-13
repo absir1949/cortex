@@ -113,7 +113,7 @@ class KnowledgeService:
         *,
         group_id: Optional[int] = None,
     ) -> str:
-        """按需研究用的 LLM 调用
+        """外部搜索问答用的 LLM 调用
         evidence = [{content_id, url, author, title, transcript?, comments: [{author, text, likes}]}]
         """
         llm_config = config_service.get_llm_config()
@@ -148,7 +148,7 @@ class KnowledgeService:
             if not group:
                 raise ValueError("group not found")
 
-        evidence_pool = self._collect_group_evidence_global(
+        evidence_pool = self.collect_group_evidence(
             group_id,
             question=question,
             days=days,
@@ -193,7 +193,7 @@ class KnowledgeService:
                     "content_id": ev.get("content_id", ""),
                     "global_content_id": ev.get("global_content_id"),
                     "platform": ev.get("platform", ""),
-                    "source_id": ev.get("source_id", 0),
+                    "source_id": ev.get("source_id"),
                     "author": ev.get("author", ""),
                     "title": ev.get("title", ""),
                     "url": ev.get("url", ""),
@@ -210,6 +210,26 @@ class KnowledgeService:
         }
 
     # ============ 内部 ============
+
+    def collect_group_evidence(
+        self,
+        group_id: int,
+        *,
+        question: str,
+        days: int,
+        limit: int,
+    ) -> list[dict]:
+        """收集专题内可用于问听风的证据。
+
+        证据来源统一走 GroupContent -> GlobalContent。外部搜索沉淀进专题后可能
+        没有 SourceContent 关系，这类内容仍可作为问答证据，但不会进入作者报告链路。
+        """
+        return self._collect_group_evidence_global(
+            group_id,
+            question=question,
+            days=days,
+            limit=limit,
+        )
 
     @staticmethod
     def _question_terms(question: str) -> list[str]:
@@ -280,8 +300,6 @@ class KnowledgeService:
                 )
                 linked_sources = source_content_repo.sources_for_global_in_group(group_id, global_item.id)
                 source = linked_sources[0] if linked_sources else None
-                if source is None:
-                    continue
                 storage = GlobalStorage(global_item.platform, global_item.creator_id)
                 transcript = storage.get_transcript(global_item.content_id) or ""
                 comments = storage.get_comments(global_item.content_id) or []
@@ -314,8 +332,8 @@ class KnowledgeService:
                     "global_content_id": global_item.id,
                     "platform": global_item.platform,
                     "content_id": global_item.content_id,
-                    "source_id": source.id,
-                    "author": source.display_name,
+                    "source_id": source.id if source else None,
+                    "author": (source.display_name if source else global_item.author_name) or "",
                     "title": global_item.title,
                     "url": global_item.url,
                     "create_time": global_item.create_time,
@@ -715,6 +733,9 @@ class KnowledgeService:
                     body.append(f"  摘要：{ev.get('signal_summary')}")
                 for p in ev.get("new_points") or []:
                     body.append(f"  - {p}")
+            if ev.get("text"):
+                text = ev["text"]
+                body.append(f"[正文]\n{text[:1600]}" + ("..." if len(text) > 1600 else ""))
             if ev.get("transcript"):
                 t = ev["transcript"]
                 body.append(f"[博主原话]\n{t[:2000]}" + ("..." if len(t) > 2000 else ""))

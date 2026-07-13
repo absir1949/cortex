@@ -133,10 +133,10 @@ def test_tasks_empty():
         assert isinstance(r.json(), list)
 
 
-def test_research_endpoint_requires_valid_group():
+def test_research_endpoint_is_removed():
     with _client() as client:
         r = client.post("/api/groups/999/research", json={"question": "q"})
-        assert r.status_code == 404
+        assert r.status_code == 405
 
 
 def test_scheduler_endpoints():

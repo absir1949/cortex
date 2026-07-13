@@ -643,7 +643,7 @@ function operationLabel(operation: string) {
     profile_update: '观点档案',
     report_merge: '报告合并',
     report_source_batch: '报告整理',
-    research_answer: '追问研究',
+    research_answer: '外部搜索回答',
     signal_judge: '信号判定',
   }
   return labels[operation] || operation || 'unknown'

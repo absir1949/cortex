@@ -10,14 +10,15 @@ import {
   useContinueAskConversation,
   type AskConversationBrief,
   type AskMessage,
+  type AskRequest,
 } from '../api/ask'
+import { usePlatforms, type PlatformMeta } from '../api/platforms'
 import type { ReportBrief, Signal } from '../api/types'
 import SignalItem from '../components/SignalItem'
 import { formatTime } from '../utils/time'
 
 function reportKind(kind: string) {
-  if (kind === 'scheduled') return '日报'
-  if (kind === 'research') return '追问'
+  if (kind === 'scheduled') return '报告'
   return kind
 }
 
@@ -33,7 +34,6 @@ export default function GroupDetail() {
   const [showRepeats, setShowRepeats] = useState(false)
 
   const scheduledReports = useMemo(() => reports.filter((r) => r.kind === 'scheduled'), [reports])
-  const researchReports = useMemo(() => reports.filter((r) => r.kind === 'research'), [reports])
 
   const newSignals = allSignals.filter((s) => s.is_new)
   const repeatSignals = allSignals.filter((s) => !s.is_new)
@@ -85,9 +85,8 @@ export default function GroupDetail() {
 
       {activeTab === 'reports' && (
         <ReportsPane
-          reports={reports}
+          reports={scheduledReports}
           scheduledCount={scheduledReports.length}
-          researchCount={researchReports.length}
         />
       )}
 
@@ -203,11 +202,9 @@ function InsightsPane({
 function ReportsPane({
   reports,
   scheduledCount,
-  researchCount,
 }: {
   reports: ReportBrief[]
   scheduledCount: number
-  researchCount: number
 }) {
   return (
     <>
@@ -217,7 +214,7 @@ function ReportsPane({
             <h2>报告</h2>
           </div>
           <div className="archive-count">
-            {scheduledCount} 份日报 · {researchCount} 个追问
+            {scheduledCount} 份
           </div>
         </div>
         <div className="brief-list">
@@ -237,23 +234,49 @@ function ReportsPane({
 
 function AskPane({ groupId }: { groupId: number }) {
   const { data: conversations = [] } = useAskConversations(groupId)
+  const { data: platforms = [] } = usePlatforms()
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const { data: selectedConversation } = useAskConversation(groupId, selectedId)
   const createConversation = useCreateAskConversation(groupId)
   const continueConversation = useContinueAskConversation(groupId, selectedId)
   const [question, setQuestion] = useState('')
   const [followup, setFollowup] = useState('')
+  const [useExternal, setUseExternal] = useState(false)
+  const [showSearchOptions, setShowSearchOptions] = useState(false)
+  const [externalDays, setExternalDays] = useState(7)
+  const [externalLimit, setExternalLimit] = useState(10)
+  const [commentTopN, setCommentTopN] = useState(20)
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([])
   const suggestions = [
     '最近这些人在共同强调什么？',
     '最近观点有什么变化？',
     '关于价格战，他们分别怎么说？',
   ]
+  const searchablePlatforms = platforms.filter((p) => p.capabilities.includes('search'))
+
+  const askPayload = (q: string): AskRequest => ({
+    question: q,
+    use_internal: true,
+    use_external: useExternal,
+    platforms: selectedPlatforms,
+    external_days: externalDays,
+    external_limit: externalLimit,
+    comment_top_n: commentTopN,
+  })
+
+  const togglePlatform = (platformId: string) => {
+    setSelectedPlatforms((current) =>
+      current.includes(platformId)
+        ? current.filter((id) => id !== platformId)
+        : [...current, platformId],
+    )
+  }
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     const q = question.trim()
     if (!q) return
-    const res = await createConversation.mutateAsync({ question: q, days: 30, limit: 12 })
+    const res = await createConversation.mutateAsync(askPayload(q))
     setSelectedId(res.id)
     setQuestion('')
   }
@@ -262,7 +285,7 @@ function AskPane({ groupId }: { groupId: number }) {
     e.preventDefault()
     const q = followup.trim()
     if (!q || !selectedId) return
-    await continueConversation.mutateAsync({ question: q, days: 30, limit: 12 })
+    await continueConversation.mutateAsync(askPayload(q))
     setFollowup('')
   }
 
@@ -281,10 +304,29 @@ function AskPane({ groupId }: { groupId: number }) {
       <form className="ask-chat-form ask-create-form" onSubmit={submit}>
         <textarea
           className="ask-chat-input"
-          placeholder="问这个专题里的已有材料"
+          placeholder="问这个专题"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           rows={3}
+        />
+        <AskSourceControls
+          useExternal={useExternal}
+          showSearchOptions={showSearchOptions}
+          externalDays={externalDays}
+          externalLimit={externalLimit}
+          commentTopN={commentTopN}
+          platforms={searchablePlatforms}
+          selectedPlatforms={selectedPlatforms}
+          onToggleExternal={() => {
+            setUseExternal((v) => !v)
+            setShowSearchOptions(false)
+          }}
+          onToggleSearchOptions={() => setShowSearchOptions((v) => !v)}
+          onExternalDays={setExternalDays}
+          onExternalLimit={setExternalLimit}
+          onCommentTopN={setCommentTopN}
+          onAllPlatforms={() => setSelectedPlatforms([])}
+          onTogglePlatform={togglePlatform}
         />
         <div className="ask-chat-actions">
           <div className="ask-suggestions">
@@ -293,7 +335,7 @@ function AskPane({ groupId }: { groupId: number }) {
             ))}
           </div>
           <button className="pill-button primary" disabled={createConversation.isPending || !question.trim()}>
-            {createConversation.isPending ? '思考中' : '新建对话'}
+            {createConversation.isPending ? '提交中' : '问听风'}
           </button>
         </div>
       </form>
@@ -330,16 +372,16 @@ function AskPane({ groupId }: { groupId: number }) {
               <form className="ask-followup-form" onSubmit={submitFollowup}>
                 <textarea
                   className="ask-chat-input"
-                  placeholder="继续追问这条对话..."
+                  placeholder="继续问这条对话..."
                   value={followup}
                   onChange={(e) => setFollowup(e.target.value)}
                   rows={2}
                 />
                 <button className="pill-button primary" disabled={continueConversation.isPending || !followup.trim()}>
-                  {continueConversation.isPending ? '思考中' : '继续问'}
+                  {continueConversation.isPending ? '提交中' : '继续问'}
                 </button>
               </form>
-              {continueConversation.error && <div className="notice-line danger">继续追问失败：{(continueConversation.error as any)?.message || '未知错误'}</div>}
+              {continueConversation.error && <div className="notice-line danger">继续提问失败：{(continueConversation.error as any)?.message || '未知错误'}</div>}
             </>
           ) : (
             <div className="ask-detail-empty">
@@ -349,6 +391,125 @@ function AskPane({ groupId }: { groupId: number }) {
         </div>
       </div>
     </section>
+  )
+}
+
+function boundedNumber(value: string, fallback: number, min: number, max: number) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
+
+function AskSourceControls({
+  useExternal,
+  showSearchOptions,
+  externalDays,
+  externalLimit,
+  commentTopN,
+  platforms,
+  selectedPlatforms,
+  onToggleExternal,
+  onToggleSearchOptions,
+  onExternalDays,
+  onExternalLimit,
+  onCommentTopN,
+  onAllPlatforms,
+  onTogglePlatform,
+}: {
+  useExternal: boolean
+  showSearchOptions: boolean
+  externalDays: number
+  externalLimit: number
+  commentTopN: number
+  platforms: PlatformMeta[]
+  selectedPlatforms: string[]
+  onToggleExternal: () => void
+  onToggleSearchOptions: () => void
+  onExternalDays: (value: number) => void
+  onExternalLimit: (value: number) => void
+  onCommentTopN: (value: number) => void
+  onAllPlatforms: () => void
+  onTogglePlatform: (platformId: string) => void
+}) {
+  return (
+    <div className="ask-source-line">
+      <label className="ask-source-check">
+        <input type="checkbox" checked={useExternal} onChange={onToggleExternal} />
+        <span>补充找资料</span>
+      </label>
+
+      {useExternal && (
+        <div className="ask-search-settings">
+          <button type="button" className="ask-search-summary" onClick={onToggleSearchOptions}>
+            近 {externalDays} 天 · 最多 {externalLimit} 条
+          </button>
+          {showSearchOptions && (
+            <div className="ask-search-popover">
+              <div className="ask-source-fieldset">
+                <label>
+                  <span>搜最近</span>
+                  <span className="ask-number-field">
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={externalDays}
+                      onChange={(e) => onExternalDays(boundedNumber(e.target.value, externalDays, 1, 365))}
+                    />
+                    <em>天</em>
+                  </span>
+                </label>
+                <label>
+                  <span>最多看</span>
+                  <span className="ask-number-field">
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={externalLimit}
+                      onChange={(e) => onExternalLimit(boundedNumber(e.target.value, externalLimit, 1, 50))}
+                    />
+                    <em>条</em>
+                  </span>
+                </label>
+                <label>
+                  <span>每条评论</span>
+                  <span className="ask-number-field">
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={commentTopN}
+                      onChange={(e) => onCommentTopN(boundedNumber(e.target.value, commentTopN, 0, 100))}
+                    />
+                    <em>条</em>
+                  </span>
+                </label>
+              </div>
+              <div className="ask-platforms">
+                <button
+                  type="button"
+                  className={`ask-platform ${selectedPlatforms.length === 0 ? 'active' : ''}`}
+                  onClick={onAllPlatforms}
+                >
+                  所有平台
+                </button>
+                {platforms.map((platform) => (
+                  <button
+                    type="button"
+                    key={platform.id}
+                    className={`ask-platform ${selectedPlatforms.includes(platform.id) ? 'active' : ''}`}
+                    onClick={() => onTogglePlatform(platform.id)}
+                  >
+                    {platform.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -385,20 +546,51 @@ function AskMessageBubble({ message }: { message: AskMessage }) {
             {evidenceOpen ? '收起证据' : `证据 · ${message.evidence.length}`}
           </button>
           {evidenceOpen && message.evidence.map((ev) => (
-            <a
-              key={`${ev.platform || 'content'}-${ev.global_content_id || ev.content_id}`}
-              href={ev.url || undefined}
-              target="_blank"
-              rel="noreferrer"
-              className="ask-evidence-row"
-            >
-              <strong>{ev.author}</strong>
-              <span>{ev.title || ev.signal_summary || ev.content_id}</span>
-              {ev.snippet && <small>{ev.snippet}</small>}
-            </a>
+            <AskEvidenceRow key={askEvidenceKey(ev)} evidence={ev} />
           ))}
         </div>
       )}
     </div>
+  )
+}
+
+function askEvidenceKey(evidence: AskMessage['evidence'][number]) {
+  if (evidence.kind === 'external_search_task') return `task-${evidence.task_id || evidence.status}`
+  return `${evidence.platform || 'content'}-${evidence.global_content_id || evidence.content_id}`
+}
+
+function AskEvidenceRow({ evidence }: { evidence: AskMessage['evidence'][number] }) {
+  if (evidence.kind === 'external_search_task') {
+    return (
+      <div className={`ask-evidence-row task ${evidence.status || ''}`}>
+        <strong>{evidence.title || '外部资料搜索'}</strong>
+        <span>{evidence.status === 'failed' ? '失败' : '搜索中'}</span>
+        {evidence.snippet && <small>{evidence.snippet}</small>}
+        {evidence.task_id && <small className="mono-text">{evidence.task_id.slice(0, 12)}</small>}
+      </div>
+    )
+  }
+
+  const body = (
+    <>
+      <strong>{evidence.author}</strong>
+      <span>{evidence.title || evidence.signal_summary || evidence.content_id}</span>
+      {evidence.snippet && <small>{evidence.snippet}</small>}
+    </>
+  )
+
+  if (!evidence.url) {
+    return <div className="ask-evidence-row">{body}</div>
+  }
+
+  return (
+    <a
+      href={evidence.url}
+      target="_blank"
+      rel="noreferrer"
+      className="ask-evidence-row"
+    >
+      {body}
+    </a>
   )
 }

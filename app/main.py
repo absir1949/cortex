@@ -28,7 +28,6 @@ from app.settings import settings
 from app.db.migrations import run_migrations
 from app.api import groups as groups_api
 from app.api import sources as sources_api
-from app.api import research as research_api
 from app.api import tasks as tasks_api
 from app.api import reports as reports_api
 from app.api import config as config_api
@@ -111,7 +110,6 @@ def create_app() -> FastAPI:
     app.include_router(auth_api.me_router, dependencies=user_deps)
     app.include_router(groups_api.router, dependencies=user_deps)
     app.include_router(sources_api.router, dependencies=user_deps)
-    app.include_router(research_api.router, dependencies=user_deps)
     app.include_router(tasks_api.router, dependencies=user_deps)
     app.include_router(reports_api.router, dependencies=user_deps)
     app.include_router(config_api.router, dependencies=admin_deps)
