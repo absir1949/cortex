@@ -1,11 +1,7 @@
 import { Link } from 'react-router-dom'
 import type { Signal } from '../api/types'
 import TranscriptToggle from './TranscriptCard'
-
-function formatTime(value?: string | null) {
-  if (!value) return ''
-  return value.slice(0, 16).replace('T', ' ')
-}
+import { formatTime } from '../utils/time'
 
 interface Props {
   signal: Signal

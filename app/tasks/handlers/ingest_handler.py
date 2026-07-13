@@ -35,14 +35,14 @@ def handle_ingest(task: Task, ctx: TaskContext) -> dict:
       {"group_id": int, "force": bool, "analyze": bool, "source_id": int?, "target_id": int?}
 
     如果指定 source_id，只跑该源；否则跑整个组。
-    analyze=True 时采集完触发知识提炼（仅 group 模式）。
+    analyze=True 时采集完触发知识提炼（仅 group 模式）；默认只刷新不整理。
     """
     params = task.params or {}
     group_id = params.get("group_id") or task.group_id
     source_id = params.get("source_id") or task.source_id
     target_id = params.get("target_id")
     force = bool(params.get("force", False))
-    analyze = bool(params.get("analyze", True))
+    analyze = bool(params.get("analyze", False))
 
     svc = IngestService()
 

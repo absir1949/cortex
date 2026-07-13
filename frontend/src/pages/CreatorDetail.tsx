@@ -7,10 +7,11 @@ import type { SourceContent } from '../api/sources'
 import { useRunSource, useGroup } from '../api/groups'
 import { useTask } from '../api/tasks'
 import TranscriptToggle from '../components/TranscriptCard'
+import { formatTime } from '../utils/time'
 
-function formatTime(value?: string | null) {
+function formatDate(value?: string | null) {
   if (!value) return ''
-  return value.slice(0, 10)
+  return formatTime(value).slice(0, 10)
 }
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -117,7 +118,7 @@ export default function CreatorDetail() {
             <h1>{detail.name}</h1>
             <div className="creator-metrics">
               <span className="platform-tag">{platformLabel}</span>
-              {detail.last_check && <span>最近采集 {formatTime(detail.last_check)}</span>}
+              {detail.last_check && <span>最近采集 {formatDate(detail.last_check)}</span>}
               <span>{total} 条内容</span>
               <span>{newCount} 条新信号</span>
               <span>{repeatCount} 条重复</span>
@@ -194,7 +195,7 @@ export default function CreatorDetail() {
                     <span className="signal-item-summary">{c.title || '（无标题）'}</span>
                   </div>
                   <div className="signal-meta">
-                    <span>{formatTime(c.create_time)}</span>
+                    <span>{formatDate(c.create_time)}</span>
                     {c.statistics && c.statistics.digg_count != null && (
                       <><span>·</span><span>赞 {c.statistics.digg_count}</span></>
                     )}

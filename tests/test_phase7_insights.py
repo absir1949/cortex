@@ -7,14 +7,15 @@
   - 报告 _write_report 含趋势段（mock LLM 端到端）
 """
 from __future__ import annotations
+import json
 import pytest
 from pathlib import Path
 from sqlmodel import Session
 
 from app.db.engine import get_engine
-from app.db.schema import KnowledgeGroup, Source, Signal
+from app.db.schema import KnowledgeGroup, Report, Source, Signal
 from app.db.repos import GroupRepo, SourceRepo, SignalRepo
-from app.models.group import SourceType
+from app.models.group import ReportKind, SourceType
 from app.services.insight_service import InsightService
 from app.services.knowledge_service import KnowledgeService
 
@@ -151,32 +152,39 @@ def test_build_signals_block_groups_by_source():
 
 # ---------- insights API 端点 ----------
 
-def test_insights_api_endpoint(monkeypatch):
+def test_insights_api_endpoint(tmp_path):
     from fastapi.testclient import TestClient
     from app.main import app
     from tests.auth_helpers import auth_headers
     client = TestClient(app, headers=auth_headers())
 
     grp, s1, s2 = _make_group_with_sources()
-    _add_signal(s1, grp, "c1", "观点A", ["私域"])
-    _add_signal(s2, grp, "c2", "观点B", ["私域"])
-
-    # mock InsightService 返回趋势
-    from app.services import insight_service
-    orig = insight_service.InsightService
-
-    class FakeInsight(orig):
-        def build_group_insights(self, group_id, *, days=14):
-            return {"trends": [{"trend": "测试趋势", "source_names": ["张三", "李四"],
-                                "signal_count": 2, "momentum": "↗ 升温", "why_hot": ""}],
-                    "raw_signal_count": 2, "days": days}
-    monkeypatch.setattr(insight_service, "InsightService", FakeInsight)
+    json_path = tmp_path / "report.json"
+    json_path.write_text(json.dumps({
+        "insights": {
+            "trends": [{"trend": "测试趋势", "source_names": ["张三", "李四"],
+                        "signal_count": 2, "momentum": "↗ 升温", "why_hot": ""}],
+            "raw_signal_count": 2,
+            "days": 14,
+        }
+    }, ensure_ascii=False), encoding="utf-8")
+    with _session() as s:
+        s.add(Report(
+            group_id=grp,
+            kind=ReportKind.SCHEDULED.value,
+            title="微信小店报告",
+            summary="摘要",
+            content_md_path=str(tmp_path / "report.md"),
+            content_json_path=str(json_path),
+        ))
+        s.commit()
 
     r = client.get(f"/api/groups/{grp}/insights?days=14")
     assert r.status_code == 200
     data = r.json()
     assert data["trends"][0]["trend"] == "测试趋势"
     assert data["days"] == 14
+    assert data["report_title"] == "微信小店报告"
 
 
 def test_insights_api_group_not_found():
@@ -332,31 +340,34 @@ def test_analyze_group_unjudged_does_not_go_to_deep_analysis(monkeypatch):
 
 # ---------- 修复点验证：insights 端点读配置默认 days ----------
 
-def test_insights_api_uses_config_default_days(monkeypatch):
-    """insights 端点不传 days 时，用 insight_lookback_days 配置"""
-    from app.services import config_service
+def test_insights_api_reads_snapshot_without_realtime_llm(monkeypatch, tmp_path):
+    """insights 端点只读报告快照，不在页面访问时实时跑 InsightService。"""
     from fastapi.testclient import TestClient
     from app.main import app
     from tests.auth_helpers import auth_headers
     client = TestClient(app, headers=auth_headers())
 
     grp, s1, s2 = _make_group_with_sources(slug="insight-config")
-    _add_signal(s1, grp, "c1", "A", ["x"])
-    _add_signal(s2, grp, "c2", "B", ["x"])
+    json_path = tmp_path / "snapshot.json"
+    json_path.write_text(json.dumps({
+        "insights": {"trends": [], "raw_signal_count": 3, "days": 30}
+    }, ensure_ascii=False), encoding="utf-8")
+    with _session() as s:
+        s.add(Report(
+            group_id=grp,
+            kind=ReportKind.SCHEDULED.value,
+            title="快照报告",
+            summary="摘要",
+            content_md_path=str(tmp_path / "snapshot.md"),
+            content_json_path=str(json_path),
+        ))
+        s.commit()
 
-    config_service.set_system_value("insight_lookback_days", 30)
-
-    captured = {"days": None}
     from app.services import insight_service
-    orig = insight_service.InsightService.build_group_insights
     def spy(self, group_id, *, days=14):
-        captured["days"] = days
-        return None
+        raise AssertionError("should not run realtime insight")
     monkeypatch.setattr(insight_service.InsightService, "build_group_insights", spy)
 
-    client.get(f"/api/groups/{grp}/insights")  # 不传 days
-    assert captured["days"] == 30  # 用了配置值，不是写死的 14
-
-    client.get(f"/api/groups/{grp}/insights?days=7")  # 显式传
-    assert captured["days"] == 7
-    config_service.invalidate_cache()
+    resp = client.get(f"/api/groups/{grp}/insights")
+    assert resp.status_code == 200
+    assert resp.json()["raw_signal_count"] == 3

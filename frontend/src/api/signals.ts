@@ -36,11 +36,14 @@ export interface InsightResult {
   trends: Trend[]
   raw_signal_count: number
   days: number
+  report_id?: number | null
+  report_title?: string
+  generated_at?: string
 }
 
-export const useGroupInsights = (groupId: number | null | undefined, days = 14) =>
+export const useGroupInsights = (groupId: number | null | undefined, days = 14, enabled = true) =>
   useQuery({
     queryKey: ['insights', groupId, days],
     queryFn: () => api.get<InsightResult | null>(`/groups/${groupId}/insights?days=${days}`),
-    enabled: !!groupId,
+    enabled: !!groupId && enabled,
   })

@@ -12,6 +12,7 @@ import { useReloadScheduler, useSchedulerJobs } from '../api/scheduler'
 import { useCancelTask } from '../api/tasks'
 import type { AdminOverview, AdminTargetRow, AdminTaskRow, AdminUsageSummary, AdminUserRow } from '../api/types'
 import Settings from './Settings'
+import { formatTime } from '../utils/time'
 
 type Tab = 'overview' | 'users' | 'targets' | 'tasks' | 'usage' | 'system'
 
@@ -23,11 +24,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'usage', label: '用量' },
   { id: 'system', label: '系统' },
 ]
-
-function formatTime(value?: string | null) {
-  if (!value) return '-'
-  return value.slice(0, 16).replace('T', ' ')
-}
 
 function statusLabel(status: string) {
   if (status === 'succeeded') return '成功'

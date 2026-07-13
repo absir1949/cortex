@@ -4,11 +4,7 @@ import { useGroups } from '../api/groups'
 import { useRecentNewSignals } from '../api/signals'
 import SignalItem from '../components/SignalItem'
 import type { Signal } from '../api/types'
-
-function formatTime(value?: string | null) {
-  if (!value) return ''
-  return value.slice(0, 16).replace('T', ' ')
-}
+import { formatTime } from '../utils/time'
 
 function formatToday() {
   return new Intl.DateTimeFormat('zh-CN', {

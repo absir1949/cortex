@@ -2,7 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { useGroupReports } from '../api/reports'
-import { useGroupSignals, useGroupInsights, type Trend } from '../api/signals'
+import { useGroupSignals, useGroupInsights, type InsightResult, type Trend } from '../api/signals'
 import {
   useAskConversation,
   useAskConversations,
@@ -13,11 +13,7 @@ import {
 } from '../api/ask'
 import type { ReportBrief, Signal } from '../api/types'
 import SignalItem from '../components/SignalItem'
-
-function formatTime(value?: string | null) {
-  if (!value) return ''
-  return value.slice(0, 16).replace('T', ' ')
-}
+import { formatTime } from '../utils/time'
 
 function reportKind(kind: string) {
   if (kind === 'scheduled') return '日报'
@@ -25,15 +21,15 @@ function reportKind(kind: string) {
   return kind
 }
 
-type TopicTab = 'signals' | 'insights' | 'ask'
+type TopicTab = 'signals' | 'insights' | 'reports' | 'ask'
 
 export default function GroupDetail() {
   const { id } = useParams()
   const gid = Number(id)
   const { data: reports = [] } = useGroupReports(gid, 50)
   const { data: allSignals = [] } = useGroupSignals(gid)
-  const { data: insights, isFetching: isFetchingInsights } = useGroupInsights(gid, 14)
   const [activeTab, setActiveTab] = useState<TopicTab>('signals')
+  const { data: insights, isFetching: isFetchingInsights } = useGroupInsights(gid, 14, activeTab === 'insights')
   const [showRepeats, setShowRepeats] = useState(false)
 
   const scheduledReports = useMemo(() => reports.filter((r) => r.kind === 'scheduled'), [reports])
@@ -46,6 +42,7 @@ export default function GroupDetail() {
   const tabs: { key: TopicTab; label: string; meta?: string }[] = [
     { key: 'signals', label: '最近信号', meta: `${newSignals.length || allSignals.length} 条` },
     { key: 'insights', label: '洞察', meta: trends.length ? `${trends.length} 个趋势` : undefined },
+    { key: 'reports', label: '报告', meta: scheduledReports.length ? `${scheduledReports.length} 份` : undefined },
     { key: 'ask', label: '问听风' },
   ]
 
@@ -78,13 +75,19 @@ export default function GroupDetail() {
 
       {activeTab === 'insights' && (
         <InsightsPane
+          insights={insights}
           trends={trends}
-          reports={reports}
-          scheduledCount={scheduledReports.length}
-          researchCount={researchReports.length}
           rawSignalCount={insights?.raw_signal_count ?? 0}
           days={insights?.days ?? 14}
           isFetching={isFetchingInsights}
+        />
+      )}
+
+      {activeTab === 'reports' && (
+        <ReportsPane
+          reports={reports}
+          scheduledCount={scheduledReports.length}
+          researchCount={researchReports.length}
         />
       )}
 
@@ -140,18 +143,14 @@ function SignalsPane({
 }
 
 function InsightsPane({
+  insights,
   trends,
-  reports,
-  scheduledCount,
-  researchCount,
   rawSignalCount,
   days,
   isFetching,
 }: {
+  insights?: InsightResult | null
   trends: Trend[]
-  reports: ReportBrief[]
-  scheduledCount: number
-  researchCount: number
   rawSignalCount: number
   days: number
   isFetching: boolean
@@ -163,7 +162,7 @@ function InsightsPane({
           <div>
             <h2>洞察</h2>
           </div>
-          <span className="reader-tag">近 {days} 天</span>
+          <span className="reader-tag">{insights?.generated_at ? formatTime(insights.generated_at) : `近 ${days} 天`}</span>
         </div>
         {trends.length > 0 ? (
           <div className="insight-stack">
@@ -182,18 +181,32 @@ function InsightsPane({
         ) : (
           <div className="empty-topic">
             {isFetching
-              ? '正在分析'
+              ? '正在读取'
               : rawSignalCount >= 2
                 ? `${rawSignalCount} 条新信号，暂无共同趋势`
                 : '暂无共同趋势'}
           </div>
         )}
       </section>
+    </>
+  )
+}
 
+function ReportsPane({
+  reports,
+  scheduledCount,
+  researchCount,
+}: {
+  reports: ReportBrief[]
+  scheduledCount: number
+  researchCount: number
+}) {
+  return (
+    <>
       <section className="reader-block">
         <div className="reader-block-head">
           <div>
-            <h2>整理记录</h2>
+            <h2>报告</h2>
           </div>
           <div className="archive-count">
             {scheduledCount} 份日报 · {researchCount} 个追问

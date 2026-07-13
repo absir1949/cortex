@@ -1,13 +1,16 @@
 from __future__ import annotations
+import json
+from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel import select
 
 from app.auth import get_current_user
 from app.authz import assert_group_owner, owned_group_ids
 from app.db.engine import get_session
 from app.db.repos import SignalRepo, SourceRepo
-from app.db.schema import GlobalContent, Source, SourceContent
-from app.services import config_service
+from app.db.schema import GlobalContent, Report, Source, SourceContent
+from app.models.group import ReportKind
 from app.storage.fs import StorageManager
 
 
@@ -137,14 +140,34 @@ def get_group_insights(
     days: Optional[int] = Query(None, ge=1, le=90),
     current_user: dict = Depends(get_current_user),
 ):
-    """按需重新生成跨博主趋势洞察。
-
-    days 不传时，读 insight_lookback_days 配置作为默认值（与日报里的趋势提炼保持一致）。
-    """
+    """读取最新整理报告里的洞察快照，不在页面访问时实时消耗 LLM。"""
     with get_session() as s:
         assert_group_owner(s, group_id, current_user)
-    # days 未指定则用配置默认值
-    if days is None:
-        days = config_service.system_int("insight_lookback_days", 14)
-    from app.services.insight_service import InsightService
-    return InsightService().build_group_insights(group_id, days=days)
+        report = s.exec(
+            select(Report)
+            .where(Report.group_id == group_id)
+            .where(Report.kind == ReportKind.SCHEDULED.value)
+            .order_by(Report.created_at.desc())
+            .limit(1)
+        ).first()
+    if not report or not report.content_json_path:
+        return None
+
+    path = Path(report.content_json_path)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    insights = payload.get("insights")
+    if not insights:
+        return None
+    return {
+        "trends": list(insights.get("trends") or []),
+        "raw_signal_count": int(insights.get("raw_signal_count") or 0),
+        "days": int(insights.get("days") or days or 14),
+        "report_id": report.id,
+        "report_title": report.title,
+        "generated_at": report.created_at,
+    }

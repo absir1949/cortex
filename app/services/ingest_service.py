@@ -325,16 +325,25 @@ class IngestService:
         task_id: Optional[str] = None,
     ) -> dict:
         """刷新共享采集目标：平台内容只采/转录一次，再分发给订阅者。"""
-        with get_session() as s:
-            target = IngestTargetRepo(s).get(target_id)
-            sources = IngestTargetRepo(s).sources_for_target(target_id, enabled_only=True)
+        # 注意：target 和 sources 是 ORM 对象，在下面的逻辑中被反复访问。
+        # 不能在取出来后立刻关闭 session，否则会触发 DetachedInstanceError。
+        # 用一个贯穿整个方法的主 session。
+        main_session = get_session()
+        try:
+            target = IngestTargetRepo(main_session).get(target_id)
+            sources = IngestTargetRepo(main_session).sources_for_target(target_id, enabled_only=True)
             if task_id:
-                IngestTargetRepo(s).claim(target_id, task_id)
+                IngestTargetRepo(main_session).claim(target_id, task_id)
+        except Exception:
+            main_session.close()
+            raise
+
         if not target:
+            main_session.close()
             raise ValueError(f"ingest target {target_id} not found")
         if not sources:
-            with get_session() as s:
-                IngestTargetRepo(s).recompute_params(target_id)
+            IngestTargetRepo(main_session).recompute_params(target_id)
+            main_session.close()
             return {
                 "target_id": target_id,
                 "refresh_run_id": None,
@@ -346,6 +355,7 @@ class IngestService:
         primary = sources[0]
         adapter = get_adapter(target.platform)
         if not adapter:
+            main_session.close()
             raise RuntimeError(f"unsupported platform: {target.platform}")
 
         config = {
@@ -359,14 +369,13 @@ class IngestService:
         counts = self._empty_counts()
         errors: list[dict] = []
 
-        with get_session() as s:
-            refresh_run = RefreshRunRepo(s).start(
-                scope="target",
-                group_id=primary.group_id,
-                source_id=primary.id,
-                task_id=task_id,
-                lookback_days=days,
-            )
+        refresh_run = RefreshRunRepo(main_session).start(
+            scope="target",
+            group_id=primary.group_id,
+            source_id=primary.id,
+            task_id=task_id,
+            lookback_days=days,
+        )
 
         from app.tasks.runner import CancelledError
         try:
@@ -376,11 +385,10 @@ class IngestService:
 
             counts["discovered"] = len(contents)
             counts["deduped"] = len(unique_contents)
-            with get_session() as s:
-                known_ids = GlobalContentRepo(s).known_ids(
-                    target.platform,
-                    [c.content_id for c in unique_contents],
-                )
+            known_ids = GlobalContentRepo(main_session).known_ids(
+                target.platform,
+                [c.content_id for c in unique_contents],
+            )
             counts["new_contents"] = len([c for c in unique_contents if c.content_id not in known_ids])
             counts["known_contents"] = max(len(unique_contents) - counts["new_contents"], 0)
             self._log(log_cb, f"  候选 {len(contents)} 条，去重后 {len(unique_contents)} 条；新发现 {counts['new_contents']} 条")
@@ -389,14 +397,13 @@ class IngestService:
             for content in unique_contents:
                 self._check_cancelled(is_cancelled)
                 creator_id = self._resolve_content_creator_id(content, target, primary)
-                with get_session() as s:
-                    global_item = GlobalContentRepo(s).upsert_from_content(content, creator_id=creator_id)
-                    global_id = int(global_item.id)
-                    global_creator_id = global_item.creator_id
-                    self._link_global_content_to_sources(s, global_id, sources, target.id)
-                    # 迁移期兼容旧表，旧 UI/测试仍可按 source 查到 content_items。
-                    for src in sources:
-                        ContentRepo(s).upsert_from_content(src, content)
+                global_item = GlobalContentRepo(main_session).upsert_from_content(content, creator_id=creator_id)
+                global_id = int(global_item.id)
+                global_creator_id = global_item.creator_id
+                self._link_global_content_to_sources(main_session, global_id, sources, target.id)
+                # 迁移期兼容旧表，旧 UI/测试仍可按 source 查到 content_items。
+                for src in sources:
+                    ContentRepo(main_session).upsert_from_content(src, content)
                 content_pairs.append((content, global_id, global_creator_id))
 
             legacy_pairs = self._bootstrap_global_from_legacy_sources(sources, target.id)
@@ -453,6 +460,8 @@ class IngestService:
             counts["failed"] += 1
             self._finish_target_refresh(target_id, refresh_run.id, STATUS_FAILED, counts, errors)
             raise
+        finally:
+            main_session.close()
 
     # ============ pipeline stages ============
 

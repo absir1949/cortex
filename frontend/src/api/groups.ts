@@ -105,7 +105,7 @@ export const useRunGroup = (groupId: number) =>
     mutationFn: (opts: { force?: boolean; analyze?: boolean } = {}) => {
       const qs = new URLSearchParams()
       qs.set('force', String(opts.force ?? true))
-      qs.set('analyze', String(opts.analyze ?? true))
+      qs.set('analyze', String(opts.analyze ?? false))
       return api.post<{ task_id: string }>(`/groups/${groupId}/run?${qs.toString()}`)
     },
   })

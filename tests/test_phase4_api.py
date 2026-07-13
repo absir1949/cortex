@@ -1,5 +1,7 @@
 """Phase 4 冒烟测试：REST API + TaskRunner"""
 from __future__ import annotations
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -91,6 +93,24 @@ def test_config_api():
         values = r.json()["values"]
         assert values["llm_model"] == "test-model"
         assert values["comment_top_n"] == 33
+
+
+def test_group_run_defaults_to_refresh_only():
+    with _client() as client, patch("app.api.groups.get_runner") as mock_runner:
+        mock_runner.return_value.enqueue.return_value = "task-refresh-only"
+        r = client.post("/api/groups", json={"name": "默认刷新", "slug": "refresh-only"})
+        assert r.status_code == 201
+        gid = r.json()["id"]
+
+        resp = client.post(f"/api/groups/{gid}/run")
+        assert resp.status_code == 202
+        _, kwargs = mock_runner.return_value.enqueue.call_args
+        assert kwargs["params"]["analyze"] is False
+
+        resp = client.post(f"/api/groups/{gid}/run?analyze=true")
+        assert resp.status_code == 202
+        _, kwargs = mock_runner.return_value.enqueue.call_args
+        assert kwargs["params"]["analyze"] is True
 
 
 def test_prompts_api():

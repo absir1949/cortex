@@ -178,7 +178,7 @@ def update_group(group_id: int, req: GroupUpdateReq, current_user: dict = Depend
 def run_group(
     group_id: int,
     force: bool = Query(True),
-    analyze: bool = Query(True),
+    analyze: bool = Query(False),
     current_user: dict = Depends(get_current_user),
 ):
     with get_session() as s:

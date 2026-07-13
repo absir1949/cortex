@@ -12,10 +12,10 @@ import {
 } from '../api/groups'
 import { usePlatforms } from '../api/platforms'
 import { useGroupSourceSummaries, type SourceSummary } from '../api/sources'
+import { formatTime as _formatTime } from '../utils/time'
 
-function formatTime(value?: string | null) {
-  if (!value) return '还没刷新'
-  return value.slice(0, 16).replace('T', ' ')
+function formatTime(v?: string | null) {
+  return v ? _formatTime(v) : '还没刷新'
 }
 
 function sourceKind(s: SourceSummary) {

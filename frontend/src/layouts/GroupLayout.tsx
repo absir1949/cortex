@@ -9,10 +9,10 @@ import {
 } from '../api/groups'
 import { useSchedulerJobs } from '../api/scheduler'
 import { useTask } from '../api/tasks'
+import { formatTime as _formatTime } from '../utils/time'
 
-function formatTime(value?: string | null) {
-  if (!value) return '待安排'
-  return value.slice(0, 16).replace('T', ' ')
+function formatTime(v?: string | null) {
+  return v ? _formatTime(v) : '待安排'
 }
 
 export default function GroupLayout() {
@@ -56,8 +56,8 @@ export default function GroupLayout() {
   if (!group) return <div className="text-danger">未找到</div>
 
   const onRunGroup = async () => {
-    await runGroup.mutateAsync({ force: true, analyze: true })
-    setNotice('刷新已开始。')
+    await runGroup.mutateAsync({ force: true, analyze: false })
+    setNotice('刷新已开始，报告可在更多里手动整理。')
   }
 
   const onAnalyze = async () => {
